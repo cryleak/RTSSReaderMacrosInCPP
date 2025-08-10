@@ -324,8 +324,7 @@ public:
     this->keyCode = keyCode;
     this->function = [function]() {
       if (InputHandler::queuedTasks.empty()) {
-        // InputHandler::queueTask(0, function, false);
-        function();
+        InputHandler::queueTask(0, function, false);
       }
     };
     keybinds.push_back(*this);
@@ -341,8 +340,7 @@ public:
     this->keyCode = vkCode.value();
     this->function = [function]() {
       if (InputHandler::queuedTasks.empty()) {
-        // InputHandler::queueTask(0, function, false);
-        function();
+        InputHandler::queueTask(0, function, false);
       }
     };
     keybinds.push_back(*this);
