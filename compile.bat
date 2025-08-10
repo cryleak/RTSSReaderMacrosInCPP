@@ -1,0 +1,1 @@
+clang++ -Wall -O3 -luser32 --std=c++23 thing.cpp keymap.cpp

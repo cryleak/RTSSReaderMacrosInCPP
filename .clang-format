@@ -1,0 +1,16 @@
+# .clang-format
+BasedOnStyle: Linux
+ReflowComments: Never
+ColumnLimit: 0
+NamespaceIndentation: None
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: false
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterFunction: false
+  AfterNamespace: false
+  BeforeCatch: false
+  BeforeElse: false
+AllowShortIfStatementsOnASingleLine: true
+BinPackArguments: false
