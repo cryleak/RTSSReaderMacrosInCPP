@@ -1,4 +1,5 @@
 #include "keymap.h"
+#include <winuser.h>
 
 key_to_vk_type g_key_to_vk[] = {{"numpad0", VK_NUMPAD0},
                                 {"numpad1", VK_NUMPAD1},
@@ -108,6 +109,10 @@ key_to_vk_type g_key_to_vk[] = {{"numpad0", VK_NUMPAD0},
                                 {"launch_mail", VK_LAUNCH_MAIL},
                                 {"launch_media", VK_LAUNCH_MEDIA_SELECT},
                                 {"launch_app1", VK_LAUNCH_APP1},
-                                {"launch_app2", VK_LAUNCH_APP2}};
+                                {"launch_app2", VK_LAUNCH_APP2},
+                                {"up", VK_UP},
+                                {"left", VK_LEFT},
+                                {"down", VK_DOWN},
+                                {"right", VK_RIGHT}};
 
 const size_t g_key_to_vk_size = sizeof(g_key_to_vk) / sizeof(g_key_to_vk[0]);
