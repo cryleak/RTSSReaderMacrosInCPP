@@ -126,7 +126,7 @@ void queueTask(int delay, std::function<void()> function, bool recursive) {
 void queueInput(WORD vkCode, std::optional<bool> state, bool recursive) {
   auto enqueue = [&](bool press) {
     queueTask(
-        5,
+        0,
         [vkCode, press]() {
           sendKeyInput(vkCode, press);
           printf("%.3f sending %hu, state: %d\n",
@@ -199,18 +199,25 @@ void queueInputs(std::vector<std::string> inputs) {
 }
 
 void executeFirstQueuedTask() {
-  std::lock_guard<std::mutex> lock(queuedTasksMutex);
-  while (!queuedTasks.empty()) {
-    Task &firstTaskReference = queuedTasks.front();
-
-    if (--firstTaskReference.delay < 0) {
-      Task firstTaskCopy = firstTaskReference;
-      queuedTasks.pop();
-      firstTaskCopy.function();
-      if (!firstTaskCopy.recursive) { // If it's recursive, execute the next
-                                      // queued task instantly
+  while (true) {
+    Task firstTaskCopy;
+    {
+      std::lock_guard<std::mutex> lock(queuedTasksMutex);
+      if (queuedTasks.empty()) {
         break;
       }
+      Task &firstTaskReference = queuedTasks.front();
+
+      if (--firstTaskReference.delay < 0) {
+        firstTaskCopy = firstTaskReference;
+        queuedTasks.pop();
+      } else {
+        break;
+      }
+    }
+    firstTaskCopy.function();
+    if (!firstTaskCopy.recursive) {
+      break;
     }
   }
 }
@@ -223,7 +230,7 @@ public:
   Keybind(DWORD keyCode, std::function<void()> function) {
     this->keyCode = keyCode;
     this->function = [function]() {
-      InputHandler::queueTask(1, function, true);
+      InputHandler::queueTask(0, function, false);
     };
     keybinds.push_back(*this);
   }
@@ -234,7 +241,7 @@ public:
 
 std::vector<Keybind> Keybind::keybinds = {};
 
-void addKeybinds() {
+void addKeybinds() { // Add keybinds here
   new Keybind('4', []() {
     InputHandler::queueInputs({"1 downR", "1 up"});
   }); // 1 down and then immediately 1 up because it is marked as recursive.
@@ -244,8 +251,7 @@ void addKeybinds() {
 
 HHOOK keyboardHook;
 
-LRESULT CALLBACK onKeyPressOrSomething(int nCode, WPARAM wParam,
-                                       LPARAM lParam) {
+LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
   if (nCode == HC_ACTION) {
     switch (wParam) {
 
@@ -289,8 +295,8 @@ int main() {
     fprintf(stderr, "why cant i set priorirtyt fck bro");
     return 1;
   }
-  keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, onKeyPressOrSomething,
-                                  GetModuleHandle(NULL), 0);
+  keyboardHook =
+      SetWindowsHookEx(WH_KEYBOARD_LL, onKeyPress, GetModuleHandle(NULL), 0);
 
   if (keyboardHook == NULL) {
     fprintf(stderr, "why cant i install the hook");
@@ -303,7 +309,7 @@ int main() {
     timeBeginPeriod(1);
     while (true) {
       double currentFrametime = RTSSReader::getRawFrametime().value_or(0);
-      if (currentFrametime != previousFrametime) {
+      if (currentFrametime == previousFrametime) {
         previousFrametime = currentFrametime;
         InputHandler::executeFirstQueuedTask();
       }
