@@ -18,9 +18,8 @@
 #pragma comment(lib, "winmm.lib")
 using namespace std::chrono_literals;
 
-DWORD frametimeMemoryOffset = 280;
-
 namespace RTSSReader {
+DWORD frametimeMemoryOffset = 280;
 HANDLE hMapFile;
 LPVOID pMapAddr;
 uintptr_t processEntryAddress;
