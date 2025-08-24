@@ -1,1 +1,1 @@
-clang++ -Wall -O3 -flto -march=haswell -fuse-ld=lld --std=c++23 main.cpp keymap.cpp -luser32
+clang++ -g -Wall -O3 -flto -march=native -fuse-ld=lld --std=c++23 main.cpp keymap.cpp -luser32

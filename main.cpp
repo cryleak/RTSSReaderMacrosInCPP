@@ -62,8 +62,8 @@ bool isProcessRunning(const TCHAR *processName) {
 
   HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL);
 
-  if (Process32First(snapshot, &entry) == TRUE) {
-    while (Process32Next(snapshot, &entry) == TRUE) {
+  if (Process32First(snapshot, &entry)) {
+    while (Process32Next(snapshot, &entry)) {
       if (_tcscmp(entry.szExeFile, processName) == 0) {
         CloseHandle(snapshot);
         return true;
@@ -148,48 +148,55 @@ namespace InputHandler {
 void queueTask(int delay, std::optional<std::function<void()>> function,
                bool recursive);
 std::optional<WORD> findKey(const std::string &keyToFind);
+
 struct Task {
   int delay;
   std::optional<std::function<void()>> function;
   bool recursive;
 };
+void queueTask(Task task);
+std::vector<Task> cacheInputs(std::vector<std::string> inputs,
+                              std::function<void()> callback = nullptr);
 extern std::queue<Task> queuedTasks;
 } // namespace InputHandler
 
 class Keybind {
 public:
-  Keybind(int keyCode, std::function<void()> function) {
+  Keybind(int keyCode, std::function<void(Keybind *thisKeybind)> function,
+          std::vector<std::string> inputs = {},
+          std::vector<std::string> modifiers = {}) {
     this->keyCode = keyCode;
-    this->function = [function]() {
-      if (InputHandler::queuedTasks.empty()) {
-        InputHandler::queueTask(0, function, false);
-      }
-    };
     this->isPressed = false;
+    this->modifiers = modifiers;
+    this->cachedInputs = InputHandler::cacheInputs(inputs);
+    this->function = [function,
+                      cachedInputs = this->cachedInputs](Keybind *thisKeybind) {
+      InputHandler::queueTask(
+          0, [&function, &thisKeybind]() { function(thisKeybind); }, false);
+    };
     keybinds.push_back(*this);
   }
 
-  Keybind(std::string key, std::function<void()> function) {
-    std::optional<WORD> vkCode = InputHandler::findKey(key);
-    if (!vkCode.has_value()) {
-      fprintf(stderr, "Can't resolve KeyCode from \"%s\"", key.c_str());
-      exit(1);
-    }
+  Keybind(const std::string &key,
+          std::function<void(Keybind *thisKeybind)> function,
+          std::vector<std::string> inputs = {},
+          std::vector<std::string> modifiers = {})
+      : Keybind(InputHandler::findKey(key).value(), function, inputs,
+                modifiers) { // This should always have a value
+  }
 
-    this->keyCode = vkCode.value();
-    this->function = [function]() {
-      if (InputHandler::queuedTasks.empty()) {
-        InputHandler::queueTask(0, function, false);
-      }
-    };
-    this->isPressed = false;
-    keybinds.push_back(*this);
+  void doInputs() {
+    for (const InputHandler::Task &task : cachedInputs) {
+      InputHandler::queueTask(task);
+    }
   }
 
   static std::vector<Keybind> keybinds;
   bool isPressed;
   DWORD keyCode;
-  std::function<void()> function;
+  std::function<void(Keybind *thisKeybind)> function;
+  std::vector<std::string> modifiers;
+  std::vector<InputHandler::Task> cachedInputs;
 };
 
 std::vector<Keybind> Keybind::keybinds = {};
@@ -202,7 +209,8 @@ bool getPhysicalKeyState(WORD vkCode) {
       return keybind.isPressed;
     }
   }
-  return false;
+  // Return Windows API KeyState if there is no keybind with that keycode.
+  return (GetAsyncKeyState(vkCode) & 0x8000) != 0;
 }
 
 std::optional<WORD> findKey(const std::string &keyToFind) {
@@ -280,15 +288,22 @@ void sendKeyInput(WORD vkCode, bool pressDown) {
 std::queue<Task> queuedTasks = {};
 std::mutex queuedTasksMutex;
 
+void queueTask(Task task) {
+  std::lock_guard<std::mutex> lock(queuedTasksMutex);
+  queuedTasks.push(task);
+}
+
 void queueTask(int delay, std::optional<std::function<void()>> function,
                bool recursive) {
   std::lock_guard<std::mutex> lock(queuedTasksMutex);
   queuedTasks.push({delay, function, recursive});
 }
 
-void queueInput(WORD vkCode, std::optional<bool> state, bool recursive) {
-  auto enqueue = [&](bool press) {
-    queueTask(
+std::vector<Task> cacheQueuedInput(WORD vkCode, std::optional<bool> state,
+                                   bool recursive) {
+  std::vector<Task> inputTasks = {};
+  auto enqueue = [&](bool press, bool enqueueRecursive) {
+    inputTasks.push_back(*new Task(
         0,
         [vkCode, press]() {
           sendKeyInput(vkCode, press);
@@ -298,25 +313,27 @@ void queueInput(WORD vkCode, std::optional<bool> state, bool recursive) {
                      .count(),
                  vkCode, press);
         },
-        recursive);
+        enqueueRecursive));
   };
 
   if (state.has_value()) {
-    enqueue(state.value());
+    enqueue(state.value(), recursive);
   } else {
-    enqueue(true);
-    enqueue(false);
+    enqueue(true, false);
+    enqueue(false, recursive);
   }
+  return inputTasks;
 }
 
 std::regex inputPattern(R"((\w+?)(?:\s(down|up|\d+))?(R)?)");
-void queueInputs(std::vector<std::string> inputs,
-                 std::function<void()> callback = nullptr) {
+std::vector<Task> cacheInputs(std::vector<std::string> inputs,
+                              std::function<void()> callback) {
+  std::vector<Task> queuedInputs = {};
   for (size_t i = 0; i < inputs.size(); ++i) {
     const std::string &input = inputs[i];
     std::smatch matches;
     if (!std::regex_match(input, matches, inputPattern)) {
-      return;
+      continue;
     }
     std::string inputName = matches[1];
     std::string secondArg = matches[2];
@@ -338,13 +355,14 @@ void queueInputs(std::vector<std::string> inputs,
     WORD vkCode;
     if (inputName == "sleep") {
       for (int i = 0; i < amount; i++) {
-        queueTask(0, std::nullopt, isRecursive);
+        queuedInputs.push_back(
+            *new InputHandler::Task(0, std::nullopt, isRecursive));
       }
       continue;
     } else {
       std::optional<WORD> keyOpt = findKey(inputName);
       if (!keyOpt.has_value()) {
-        return;
+        continue;
       }
       vkCode = keyOpt.value();
 
@@ -352,7 +370,10 @@ void queueInputs(std::vector<std::string> inputs,
     }
 
     if (inputName == "wheelup" || inputName == "wheeldown") {
-      queueInput(vkCode, true, false);
+      queuedInputs.push_back(cacheQueuedInput(
+          vkCode, true,
+          false)[0]); // This will always have a size of 1 and im crashing out
+      queuedInputs.push_back(*new Task(0, std::nullopt, false));
       queueTask(0, std::nullopt, false);
       continue;
     }
@@ -362,34 +383,39 @@ void queueInputs(std::vector<std::string> inputs,
         !state.has_value()) {
       WORD wheelInput = findKey("wheel" + inputName).value();
       for (int i = 0; i < floor(amount / 2); i++) {
-        queueInput(vkCode, true, false);
-        queueInput(vkCode, false, true);
-        queueInput(wheelInput, false, false);
+        queuedInputs.push_back(cacheQueuedInput(vkCode, true, false)[0]);
+        queuedInputs.push_back(cacheQueuedInput(vkCode, false, true)[0]);
+        queuedInputs.push_back(cacheQueuedInput(wheelInput, false, false)[0]);
         if (amount >= 3) {
-          queueTask(0, std::nullopt, false);
+          queuedInputs.push_back(*new Task(0, std::nullopt, false));
         }
       }
       if (amount & 1) {
-        queueInput(vkCode, true, false);
-        queueInput(vkCode, false, true);
+        queuedInputs.push_back(cacheQueuedInput(vkCode, true, false)[0]);
+        queuedInputs.push_back(cacheQueuedInput(vkCode, false, true)[0]);
       }
       continue;
     }
 
     for (int i = 0; i < amount; i++) {
-      queueInput(vkCode, state, isRecursive);
+      std::vector<Task> keyPressTasks =
+          cacheQueuedInput(vkCode, state, isRecursive);
+      for (Task &keyPressTask : keyPressTasks) {
+        queuedInputs.push_back(keyPressTask);
+      }
     }
   }
   if (callback) {
-    queueTask(0, callback, true);
+    queuedInputs.push_back(*new Task(0, callback, true));
   }
+  return queuedInputs;
 }
 
 void executeFirstQueuedTask() {
   while (true) {
     Task firstTaskCopy;
     {
-      std::lock_guard<std::mutex> lock(queuedTasksMutex);
+      // std::lock_guard<std::mutex> lock(queuedTasksMutex);
       if (queuedTasks.empty()) {
         break;
       }
@@ -415,17 +441,24 @@ void executeFirstQueuedTask() {
 void addKeybinds() { // Add keybinds here
   // You can't type this keycode as a string so i just typed in the virtual
   // keycode of it instead
-  new Keybind(220, []() {
-    InputHandler::queueInputs({"enter downR", "m", "enter up", "enter downR",
-                               "up 3", "enter up", "enter downR", "down down",
-                               "enter up", "down up"});
-  });
+  new Keybind(220, [](Keybind *thisKeybind) { thisKeybind->doInputs(); },
+              {"mR", "enter down", "enter up", "enter downR", "down 4",
+               "enter up", "enter downR", "down down", "enter up", "down up"});
 
-  new Keybind("F2", []() {
-    InputHandler::queueInputs({"enter downR", "m", "up 7", "enter up",
-                               "enter 2", "enter downR", "up down", "enter up",
-                               "up up", "m"});
-  });
+  new Keybind("F2", [](Keybind *thisKeybind) { thisKeybind->doInputs(); },
+              {"mR", "enter down", "up 7", "enter up", "enter", "sleep",
+               "enter", "enter downR", "up down", "enter up", "up up", "m"});
+
+  new Keybind(221, [](Keybind *thisKeybind) { thisKeybind->doInputs(); },
+              {"mR", "enter down", "up 6", "enter up", "down downR",
+               "enter down", "down up", "enter upR", "sleep 2", "space downR",
+               "m down", "m upR", "space up"},
+              {"shift"});
+
+  new Keybind(186, [](Keybind *thisKeybind) { thisKeybind->doInputs(); },
+              {"mR", "enter down", "up 7", "enter up", "down downR",
+               "enter down", "down up", "WheelDown", "enter up"},
+              {"shift"});
 
   /*
   Why is this so fucking inconsistent?
@@ -457,7 +490,7 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
     KBDLLHOOKSTRUCT *pKeyBoard = (KBDLLHOOKSTRUCT *)lParam;
 
     // Check if the key event was injected (sent by SendInput() or something
-    // idfk how this works bro)
+    // idfk how this works bro
     if (pKeyBoard->flags & LLKHF_INJECTED ||
         getActiveProcessName() != RTSSReader::targetProcess) {
       return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
@@ -471,9 +504,20 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
       DWORD vkCode = pKeyBoard->vkCode;
 
       for (Keybind &keybind : Keybind::keybinds) {
-        if (vkCode == keybind.keyCode && !keybind.isPressed) {
+        bool modifiersPressed =
+            keybind.modifiers.size() != 0 // Holy fucking auto formatter
+                ? std::all_of(
+                      keybind.modifiers.begin(), keybind.modifiers.end(),
+                      [](std::string modifier) {
+                        std::optional<WORD> key =
+                            InputHandler::findKey(modifier);
+                        return InputHandler::getPhysicalKeyState(key.value());
+                      })
+                : true;
+        if (vkCode == keybind.keyCode && !keybind.isPressed &&
+            modifiersPressed) {
           keybind.isPressed = true;
-          keybind.function();
+          keybind.function(&keybind);
           return 1;
         }
       }
@@ -500,6 +544,11 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 }
 
 double previousFrametime = 0;
+int frameGenMultiplier =
+    2; // For DLSS Frame Generation. This is completely fucking broken btw who
+       // made this shitty application?
+int framesDetected = 0;
+LARGE_INTEGER lastGenerated;
 
 int main() {
   if (!SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS)) {
@@ -526,19 +575,25 @@ int main() {
                                // to do it so fuck it, this literally relies
                                // on frametime variance it's really funny
         previousFrametime = frametime;
-        InputHandler::executeFirstQueuedTask();
+        if (RTSSReader::targetProcess == "GTA5.exe" ||
+            ++framesDetected == frameGenMultiplier) {
+          // LARGE_INTEGER currentTime, freq;
+          // QueryPerformanceFrequency(&freq);
+          // QueryPerformanceCounter(&currentTime);
+          // printf("new frame, last frame was generated %fms ago\n",
+          //        (currentTime.QuadPart - lastGenerated.QuadPart) * 1000.0 /
+          //            freq.QuadPart);
+          // QueryPerformanceCounter(&lastGenerated);
+          framesDetected = 0;
+          InputHandler::executeFirstQueuedTask();
+        }
       }
 
       // If there are currently queued tasks I want to check as often as
       // possible to check for FrameTime updates. This is incredibly bad for
       // the CPU but we should be doing it for very short time periods so it
       // should be OK.
-      bool isEmpty;
-      {
-        std::lock_guard<std::mutex> lock(InputHandler::queuedTasksMutex);
-        isEmpty = InputHandler::queuedTasks.empty();
-      }
-      if (isEmpty) {
+      if (InputHandler::queuedTasks.empty()) {
         Sleep(1);
       }
     }
