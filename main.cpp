@@ -155,48 +155,37 @@ struct Task {
   bool recursive;
 };
 void queueTask(Task task);
-std::vector<Task> cacheInputs(std::vector<std::string> inputs,
-                              std::function<void()> callback = nullptr);
+void queueInputs(std::vector<std::string> inputs,
+                 std::function<void()> callback = nullptr);
 extern std::queue<Task> queuedTasks;
 } // namespace InputHandler
 
 class Keybind {
 public:
-  Keybind(int keyCode, std::function<void(Keybind *thisKeybind)> function,
-          std::vector<std::string> inputs = {},
+  Keybind(int keyCode, std::function<void()> function,
           std::vector<std::string> modifiers = {}) {
     this->keyCode = keyCode;
     this->isPressed = false;
     this->modifiers = modifiers;
-    this->cachedInputs = InputHandler::cacheInputs(inputs);
-    this->function = [function,
-                      cachedInputs = this->cachedInputs](Keybind *thisKeybind) {
-      InputHandler::queueTask(
-          0, [&function, &thisKeybind]() { function(thisKeybind); }, false);
+    this->function = [function]() {
+      if (InputHandler::queuedTasks.empty()) {
+        InputHandler::queueTask(0, function, false);
+      }
     };
     keybinds.push_back(*this);
   }
 
-  Keybind(const std::string &key,
-          std::function<void(Keybind *thisKeybind)> function,
-          std::vector<std::string> inputs = {},
+  Keybind(const std::string &key, std::function<void()> function,
           std::vector<std::string> modifiers = {})
-      : Keybind(InputHandler::findKey(key).value(), function, inputs,
+      : Keybind(InputHandler::findKey(key).value(), function,
                 modifiers) { // This should always have a value
-  }
-
-  void doInputs() {
-    for (const InputHandler::Task &task : cachedInputs) {
-      InputHandler::queueTask(task);
-    }
   }
 
   static std::vector<Keybind> keybinds;
   bool isPressed;
   DWORD keyCode;
-  std::function<void(Keybind *thisKeybind)> function;
+  std::function<void()> function;
   std::vector<std::string> modifiers;
-  std::vector<InputHandler::Task> cachedInputs;
 };
 
 std::vector<Keybind> Keybind::keybinds = {};
@@ -299,11 +288,9 @@ void queueTask(int delay, std::optional<std::function<void()>> function,
   queuedTasks.push({delay, function, recursive});
 }
 
-std::vector<Task> cacheQueuedInput(WORD vkCode, std::optional<bool> state,
-                                   bool recursive) {
-  std::vector<Task> inputTasks = {};
-  auto enqueue = [&](bool press, bool enqueueRecursive) {
-    inputTasks.push_back(*new Task(
+void queueInput(WORD vkCode, std::optional<bool> state, bool recursive) {
+  auto enqueue = [&](bool press, bool recursiveInput) {
+    queueTask(
         0,
         [vkCode, press]() {
           sendKeyInput(vkCode, press);
@@ -313,27 +300,25 @@ std::vector<Task> cacheQueuedInput(WORD vkCode, std::optional<bool> state,
                      .count(),
                  vkCode, press);
         },
-        enqueueRecursive));
+        recursiveInput);
   };
 
   if (state.has_value()) {
-    enqueue(state.value(), recursive);
+    enqueue(state.value(),recursive);
   } else {
-    enqueue(true, false);
-    enqueue(false, recursive);
+    enqueue(true,false);
+    enqueue(false,recursive);
   }
-  return inputTasks;
 }
 
 std::regex inputPattern(R"((\w+?)(?:\s(down|up|\d+))?(R)?)");
-std::vector<Task> cacheInputs(std::vector<std::string> inputs,
-                              std::function<void()> callback) {
-  std::vector<Task> queuedInputs = {};
+void queueInputs(std::vector<std::string> inputs,
+                 std::function<void()> callback) {
   for (size_t i = 0; i < inputs.size(); ++i) {
     const std::string &input = inputs[i];
     std::smatch matches;
     if (!std::regex_match(input, matches, inputPattern)) {
-      continue;
+      return;
     }
     std::string inputName = matches[1];
     std::string secondArg = matches[2];
@@ -355,14 +340,13 @@ std::vector<Task> cacheInputs(std::vector<std::string> inputs,
     WORD vkCode;
     if (inputName == "sleep") {
       for (int i = 0; i < amount; i++) {
-        queuedInputs.push_back(
-            *new InputHandler::Task(0, std::nullopt, isRecursive));
+        queueTask(0, std::nullopt, isRecursive);
       }
       continue;
     } else {
       std::optional<WORD> keyOpt = findKey(inputName);
       if (!keyOpt.has_value()) {
-        continue;
+        return;
       }
       vkCode = keyOpt.value();
 
@@ -370,10 +354,7 @@ std::vector<Task> cacheInputs(std::vector<std::string> inputs,
     }
 
     if (inputName == "wheelup" || inputName == "wheeldown") {
-      queuedInputs.push_back(cacheQueuedInput(
-          vkCode, true,
-          false)[0]); // This will always have a size of 1 and im crashing out
-      queuedInputs.push_back(*new Task(0, std::nullopt, false));
+      queueInput(vkCode, true, false);
       queueTask(0, std::nullopt, false);
       continue;
     }
@@ -383,44 +364,38 @@ std::vector<Task> cacheInputs(std::vector<std::string> inputs,
         !state.has_value()) {
       WORD wheelInput = findKey("wheel" + inputName).value();
       for (int i = 0; i < floor(amount / 2); i++) {
-        queuedInputs.push_back(cacheQueuedInput(vkCode, true, false)[0]);
-        queuedInputs.push_back(cacheQueuedInput(vkCode, false, true)[0]);
-        queuedInputs.push_back(cacheQueuedInput(wheelInput, false, false)[0]);
+        queueInput(vkCode, true, false);
+        queueInput(vkCode, false, true);
+        queueInput(wheelInput, false, false);
         if (amount >= 3) {
-          queuedInputs.push_back(*new Task(0, std::nullopt, false));
+          queueTask(0, std::nullopt, false);
         }
       }
       if (amount & 1) {
-        queuedInputs.push_back(cacheQueuedInput(vkCode, true, false)[0]);
-        queuedInputs.push_back(cacheQueuedInput(vkCode, false, true)[0]);
+        queueInput(vkCode, true, false);
+        queueInput(vkCode, false, true);
       }
       continue;
     }
 
     for (int i = 0; i < amount; i++) {
-      std::vector<Task> keyPressTasks =
-          cacheQueuedInput(vkCode, state, isRecursive);
-      for (Task &keyPressTask : keyPressTasks) {
-        queuedInputs.push_back(keyPressTask);
-      }
+      queueInput(vkCode, state, isRecursive);
     }
   }
   if (callback) {
-    queuedInputs.push_back(*new Task(0, callback, true));
+    queueTask(0, callback, true);
   }
-  return queuedInputs;
 }
 
 void executeFirstQueuedTask() {
   while (true) {
     Task firstTaskCopy;
     {
-      // std::lock_guard<std::mutex> lock(queuedTasksMutex);
+      std::lock_guard<std::mutex> lock(queuedTasksMutex);
       if (queuedTasks.empty()) {
         break;
       }
       Task &firstTaskReference = queuedTasks.front();
-
       if (--firstTaskReference.delay < 0) {
         firstTaskCopy = firstTaskReference;
         queuedTasks.pop();
@@ -441,23 +416,33 @@ void executeFirstQueuedTask() {
 void addKeybinds() { // Add keybinds here
   // You can't type this keycode as a string so i just typed in the virtual
   // keycode of it instead
-  new Keybind(220, [](Keybind *thisKeybind) { thisKeybind->doInputs(); },
-              {"mR", "enter down", "enter up", "enter downR", "down 4",
-               "enter up", "enter downR", "down down", "enter up", "down up"});
+  new Keybind(220, []() {
+    InputHandler::queueInputs({"mR", "enter down", "enter up", "enter downR",
+                               "down 4", "enter up", "enter downR", "down down",
+                               "enter up", "down up"});
+  });
 
-  new Keybind("F2", [](Keybind *thisKeybind) { thisKeybind->doInputs(); },
-              {"mR", "enter down", "up 7", "enter up", "enter", "sleep",
-               "enter", "enter downR", "up down", "enter up", "up up", "m"});
+  new Keybind("F2", []() {
+    InputHandler::queueInputs({"mR", "enter down", "up 7", "enter up", "enter",
+                               "sleep", "enter", "enter downR", "up down",
+                               "enter up", "up up", "m"});
+  });
 
-  new Keybind(221, [](Keybind *thisKeybind) { thisKeybind->doInputs(); },
-              {"mR", "enter down", "up 6", "enter up", "down downR",
-               "enter down", "down up", "enter upR", "sleep 2", "space downR",
-               "m down", "m upR", "space up"},
+  new Keybind(221,
+              []() {
+                InputHandler::queueInputs(
+                    {"mR", "enter down", "up 6", "enter up", "down downR",
+                     "enter down", "down up", "enter upR", "sleep 2",
+                     "space downR", "m down", "m upR", "space up"});
+              },
               {"shift"});
 
-  new Keybind(186, [](Keybind *thisKeybind) { thisKeybind->doInputs(); },
-              {"mR", "enter down", "up 7", "enter up", "down downR",
-               "enter down", "down up", "WheelDown", "enter up"},
+  new Keybind(186,
+              []() {
+                InputHandler::queueInputs(
+                    {"mR", "enter down", "up 7", "enter up", "down downR",
+                     "enter down", "down up", "WheelDown", "enter up"});
+              },
               {"shift"});
 
   /*
@@ -517,7 +502,7 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
         if (vkCode == keybind.keyCode && !keybind.isPressed &&
             modifiersPressed) {
           keybind.isPressed = true;
-          keybind.function(&keybind);
+          keybind.function();
           return 1;
         }
       }
