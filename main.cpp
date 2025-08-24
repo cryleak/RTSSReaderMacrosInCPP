@@ -304,10 +304,10 @@ void queueInput(WORD vkCode, std::optional<bool> state, bool recursive) {
   };
 
   if (state.has_value()) {
-    enqueue(state.value(),recursive);
+    enqueue(state.value(), recursive);
   } else {
-    enqueue(true,false);
-    enqueue(false,recursive);
+    enqueue(true, false);
+    enqueue(false, recursive);
   }
 }
 
@@ -386,6 +386,59 @@ void queueInputs(std::vector<std::string> inputs,
     queueTask(0, callback, true);
   }
 }
+
+class TaskExecutor {
+public:
+  ~TaskExecutor() {
+    if (worker.joinable()) {
+      {
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        stop_thread = true;
+      }
+      condition.notify_one();
+      worker.join();
+    }
+  }
+
+  void start() { worker = std::thread(&TaskExecutor::loop, this); }
+
+  void enqueue(std::function<void()> task) {
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex);
+      if (stop_thread) {
+        return;
+      }
+      tasks.push(std::move(task));
+    }
+    condition.notify_one();
+  }
+
+private:
+  void loop() {
+    while (true) {
+      std::function<void()> task;
+      {
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        condition.wait(lock, [this] { return !tasks.empty() || stop_thread; });
+
+        if (stop_thread && tasks.empty()) {
+          return;
+        }
+
+        task = std::move(tasks.front());
+        tasks.pop();
+      }
+
+      task();
+    }
+  }
+
+  std::thread worker;
+  std::queue<std::function<void()>> tasks;
+  std::mutex queue_mutex;
+  std::condition_variable condition;
+  bool stop_thread = false;
+};
 
 void executeFirstQueuedTask() {
   while (true) {
@@ -533,6 +586,7 @@ int frameGenMultiplier =
     2; // For DLSS Frame Generation. This is completely fucking broken btw who
        // made this shitty application?
 int framesDetected = 0;
+static InputHandler::TaskExecutor taskExecutor;
 LARGE_INTEGER lastGenerated;
 
 int main() {
@@ -551,6 +605,7 @@ int main() {
   addKeybinds();
 
   std::thread([]() {
+    taskExecutor.start();
     timeBeginPeriod(1);
     while (true) {
       double frametime = RTSSReader::getRawFrametime().value_or(0);
@@ -570,7 +625,7 @@ int main() {
           //            freq.QuadPart);
           // QueryPerformanceCounter(&lastGenerated);
           framesDetected = 0;
-          InputHandler::executeFirstQueuedTask();
+          taskExecutor.enqueue(InputHandler::executeFirstQueuedTask); // Do this asynchronously
         }
       }
 
