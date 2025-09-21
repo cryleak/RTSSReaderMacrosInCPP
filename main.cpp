@@ -88,6 +88,8 @@ void initialize() {
     targetProcess = "GTA5_Enhanced.exe";
   } else if (isProcessRunning("GTA5.exe")) {
     targetProcess = "GTA5.exe";
+  } else if (isProcessRunning("game_win64_final.exe")) {
+    targetProcess = "game_win64_final.exe";
   } else {
     fprintf(stderr, "Could not find GTA process. Is it running?");
     exit(1);
@@ -235,6 +237,9 @@ void sendKeyInput(WORD vkCode, bool pressDown) {
     input.mi.mouseData = (vkCode == 0x1001) ? WHEEL_DELTA : -WHEEL_DELTA;
     input.mi.time = 0;
     input.mi.dwExtraInfo = 0;
+    SendInput(1, &input, sizeof(INPUT));
+    input.mi.mouseData = 0;
+    SendInput(1, &input, sizeof(INPUT));
   } else {
     input.type = INPUT_KEYBOARD;
 
@@ -270,8 +275,8 @@ void sendKeyInput(WORD vkCode, bool pressDown) {
     if (!pressDown) {
       input.ki.dwFlags |= KEYEVENTF_KEYUP;
     }
+    SendInput(1, &input, sizeof(INPUT));
   }
-  SendInput(1, &input, sizeof(INPUT));
 }
 
 std::queue<Task> queuedTasks = {};
@@ -360,6 +365,7 @@ void queueInputs(std::vector<std::string> inputs,
     }
 
     // Schizo up and down logic because it is faster
+    /*
     if ((inputName == "up" || inputName == "down") && amount != 1 &&
         !state.has_value()) {
       WORD wheelInput = findKey("wheel" + inputName).value();
@@ -377,6 +383,7 @@ void queueInputs(std::vector<std::string> inputs,
       }
       continue;
     }
+      */
 
     for (int i = 0; i < amount; i++) {
       queueInput(vkCode, state, isRecursive);
@@ -494,7 +501,7 @@ void addKeybinds() { // Add keybinds here
               []() {
                 InputHandler::queueInputs(
                     {"mR", "enter down", "up 7", "enter up", "down downR",
-                     "enter down", "down up", "WheelDown", "enter up"});
+                     "enter down", "down up", "down", "enter up"});
               },
               {"shift"});
 
@@ -583,7 +590,7 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 
 double previousFrametime = 0;
 int frameGenMultiplier =
-    2; // For DLSS Frame Generation. This is completely fucking broken btw who
+    1; // For DLSS Frame Generation. This is completely fucking broken btw who
        // made this shitty application?
 int framesDetected = 0;
 static InputHandler::TaskExecutor taskExecutor;
@@ -615,7 +622,7 @@ int main() {
                                // to do it so fuck it, this literally relies
                                // on frametime variance it's really funny
         previousFrametime = frametime;
-        if (RTSSReader::targetProcess == "GTA5.exe" ||
+        if (RTSSReader::targetProcess != "GTA5_Enhanced.exe" ||
             ++framesDetected == frameGenMultiplier) {
           // LARGE_INTEGER currentTime, freq;
           // QueryPerformanceFrequency(&freq);
@@ -625,7 +632,8 @@ int main() {
           //            freq.QuadPart);
           // QueryPerformanceCounter(&lastGenerated);
           framesDetected = 0;
-          taskExecutor.enqueue(InputHandler::executeFirstQueuedTask); // Do this asynchronously
+          taskExecutor.enqueue(
+              InputHandler::executeFirstQueuedTask); // Do this asynchronously
         }
       }
 
