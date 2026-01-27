@@ -148,47 +148,6 @@ namespace RTSSReader {
 } // namespace RTSSReader
 
 namespace InputHandler {
-	LPCTSTR GetCursorType() {
-		HCURSOR current_cursor;
-		CURSORINFO ci;
-		ci.cbSize = sizeof(CURSORINFO);
-		current_cursor = GetCursorInfo(&ci) ? ci.hCursor : NULL;
-
-		if (!current_cursor)
-		{
-			return _T("Unknown");
-		}
-
-		static HCURSOR sCursor[] = {
-			LoadCursor(NULL, IDC_APPSTARTING), LoadCursor(NULL, IDC_ARROW),
-			LoadCursor(NULL, IDC_CROSS), LoadCursor(NULL, IDC_HELP),
-			LoadCursor(NULL, IDC_IBEAM), LoadCursor(NULL, IDC_ICON),
-			LoadCursor(NULL, IDC_NO), LoadCursor(NULL, IDC_SIZE),
-			LoadCursor(NULL, IDC_SIZEALL), LoadCursor(NULL, IDC_SIZENESW),
-			LoadCursor(NULL, IDC_SIZENS), LoadCursor(NULL, IDC_SIZENWSE),
-			LoadCursor(NULL, IDC_SIZEWE), LoadCursor(NULL, IDC_UPARROW),
-			LoadCursor(NULL, IDC_WAIT)
-		};
-
-		static const size_t cursor_count = sizeof(sCursor) / sizeof(sCursor[0]);
-
-		static LPCTSTR sCursorName[cursor_count + 1] = {
-			_T("AppStarting"), _T("Arrow"), _T("Cross"), _T("Help"),
-			_T("IBeam"), _T("Icon"), _T("No"), _T("Size"),
-			_T("SizeAll"), _T("SizeNESW"), _T("SizeNS"),
-			_T("SizeNWSE"), _T("SizeWE"), _T("UpArrow"),
-			_T("Wait"), _T("Unknown")
-		};
-
-		// Find matching cursor
-		size_t i;
-		for (i = 0; i < cursor_count; ++i)
-			if (sCursor[i] == current_cursor)
-				break;
-
-		return sCursorName[i];
-	}
-
 	void queueTask(int delay, std::optional<std::function<void()>> function,
 		bool recursive);
 	std::optional<WORD> findKey(const std::string& keyToFind);
@@ -433,26 +392,25 @@ namespace InputHandler {
 			}
 
 			// Schizo up and down logic because it is faster
-			if (_tcscmp(GetCursorType(), _T("Unknown")) == 0) {
-				if ((inputName == "up" || inputName == "down") && amount != 1 &&
-					!state.has_value()) {
-					WORD wheelInput = findKey("wheel" + inputName).value();
-					for (int i = 0; i < floor(amount / 2); i++) {
-						queueInput(vkCode, true, false);
-						queueInput(vkCode, false, true);
-						queueInput(wheelInput, false, false);
-						if (amount >= 3) {
-							queueTask(0, std::nullopt, false);
-						}
-					}
-					if (amount & 1) {
-						queueInput(vkCode, true, false);
-						queueInput(vkCode, false, true);
-					}
-					continue;
+			/*
+			if ((inputName == "up" || inputName == "down") && amount != 1 &&
+				!state.has_value()) {
+			  WORD wheelInput = findKey("wheel" + inputName).value();
+			  for (int i = 0; i < floor(amount / 2); i++) {
+				queueInput(vkCode, true, false);
+				queueInput(vkCode, false, true);
+				queueInput(wheelInput, false, false);
+				if (amount >= 3) {
+				  queueTask(0, std::nullopt, false);
 				}
+			  }
+			  if (amount & 1) {
+				queueInput(vkCode, true, false);
+				queueInput(vkCode, false, true);
+			  }
+			  continue;
 			}
-			
+			  */
 
 			for (int i = 0; i < amount; i++) {
 				queueInput(vkCode, state, isRecursive);
@@ -551,36 +509,26 @@ bool inChat = false;
 void addKeybinds() { // Add keybinds here
 	// You can't type this keycode as a string so i just typed in the virtual
 	// keycode of it instead
-	new Keybind(220, []() {
+	new Keybind("F1", []() {
 		InputHandler::prepareForIntMenu();
 		InputHandler::queueInputs({ "mR", "enter down", "enter up", "enter downR",
-								   "up 3", "enter up", "enter downR", "down down",
+								   "down 4", "enter up", "enter downR", "down down",
 								   "enter up", "down up" });
 		});
 
-	new Keybind(221,
+	new Keybind("F4",
 		[]() {
 			InputHandler::prepareForIntMenu();
 			InputHandler::queueInputs(
-				{ "mR", "enter down", "down 5", "enter up", "down downR",
-				 "enter down", "down up", "enter upR", "sleep 2",
+				{ "mR", "enter down", "up 6", "enter up", "down downR",
+				 "enter down", "down up", "enter up","down 4", "sleep 2",
 				 "space downR", "m down", "m upR", "space up" });
-		},
-		{ "shift" });
+		});
 
-	new Keybind(186,
-		[]() {
-			InputHandler::prepareForIntMenu();
-			InputHandler::queueInputs(
-				{ "mR", "enter down", "down 4", "enter up", "down downR",
-				 "enter down", "down up", "down", "enter up" });
-		},
-		{ "shift" });
-
-	new Keybind("F2", []() {
+	new Keybind("F3", []() {
 		InputHandler::prepareForIntMenu();
-		InputHandler::queueInputs({ "mR", "enter down", "down 4", "enter up",
-								   "enter", "enter", "enter downR",
+		InputHandler::queueInputs({ "mR", "enter down", "up 7", "enter up",
+								   "enter", "sleep", "enter", "enter downR",
 								   "up down", "enter up", "up up", "m" });
 		});
 
@@ -601,9 +549,9 @@ void addKeybinds() { // Add keybinds here
 	new Keybind("8",
 		[]() { InputHandler::queueInputs({ "8 down", "tabR", "8 up" }); });
 
-	new Keybind("q", []() {
+	new Keybind("LAlt", []() {
 		InputHandler::queueInputs(
-			{ "4 down", "sleep 2", "2 down", "sleep 2", "tabR", "2 upR", "4 up" });
+			{ "3 down", "sleep 2", "4 down", "sleep 2", "tabR", "4 upR", "3 up" });
 		});
 
 	/*
@@ -697,8 +645,6 @@ int frameGenMultiplier =
 int framesDetected = 0;
 static InputHandler::TaskExecutor taskExecutor;
 LARGE_INTEGER lastGenerated;
-constexpr long long sleepTime = 0.5; // in ms
-
 
 int main() {
 	if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
@@ -718,15 +664,6 @@ int main() {
 	std::thread([]() {
 		taskExecutor.start();
 		timeBeginPeriod(1);
-		HANDLE hTimer = CreateWaitableTimerEx(
-			NULL, NULL,
-			CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
-			TIMER_ALL_ACCESS
-		);
-		if (hTimer == NULL) {
-			fprintf(stderr, "Failed to create high resolution timer.");
-			exit(1);
-		}
 		while (true) {
 			double frametime = RTSSReader::getRawFrametime().value_or(0);
 			if (frametime !=
@@ -755,17 +692,7 @@ int main() {
 			// the CPU but we should be doing it for very short time periods so it
 			// should be OK.
 			if (InputHandler::queuedTasks.empty()) {
-				LARGE_INTEGER dueTime;
-				dueTime.QuadPart = -(sleepTime * 10000LL);
-
-				LARGE_INTEGER currentTime, freq, endTime;
-				QueryPerformanceFrequency(&freq);
-				QueryPerformanceCounter(&currentTime);
-				if (SetWaitableTimer(hTimer, &dueTime, 0, NULL, NULL, FALSE)) { // This somehow lets me sleep with a precision of 0.5ms
-					WaitForSingleObject(hTimer, INFINITE);
-				}
-				QueryPerformanceCounter(&endTime);
-				printf("new frame, last frame was generated %fms ago\n", (endTime.QuadPart - currentTime.QuadPart) * 1000.0 / freq.QuadPart);
+				Sleep(1);
 			}
 		}
 		}).detach();
