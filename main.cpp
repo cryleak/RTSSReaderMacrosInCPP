@@ -19,6 +19,7 @@
 #include <vector>
 #include <winnt.h>
 #include <winuser.h>
+#include <iostream>
 
 #pragma comment(lib, "winmm.lib")
 using namespace std::chrono_literals;
@@ -148,46 +149,6 @@ namespace RTSSReader {
 } // namespace RTSSReader
 
 namespace InputHandler {
-	LPCTSTR GetCursorType() {
-		HCURSOR current_cursor;
-		CURSORINFO ci;
-		ci.cbSize = sizeof(CURSORINFO);
-		current_cursor = GetCursorInfo(&ci) ? ci.hCursor : NULL;
-
-		if (!current_cursor)
-		{
-			return _T("Unknown");
-		}
-
-		static HCURSOR sCursor[] = {
-			LoadCursor(NULL, IDC_APPSTARTING), LoadCursor(NULL, IDC_ARROW),
-			LoadCursor(NULL, IDC_CROSS), LoadCursor(NULL, IDC_HELP),
-			LoadCursor(NULL, IDC_IBEAM), LoadCursor(NULL, IDC_ICON),
-			LoadCursor(NULL, IDC_NO), LoadCursor(NULL, IDC_SIZE),
-			LoadCursor(NULL, IDC_SIZEALL), LoadCursor(NULL, IDC_SIZENESW),
-			LoadCursor(NULL, IDC_SIZENS), LoadCursor(NULL, IDC_SIZENWSE),
-			LoadCursor(NULL, IDC_SIZEWE), LoadCursor(NULL, IDC_UPARROW),
-			LoadCursor(NULL, IDC_WAIT)
-		};
-
-		static const size_t cursor_count = sizeof(sCursor) / sizeof(sCursor[0]);
-
-		static LPCTSTR sCursorName[cursor_count + 1] = {
-			_T("AppStarting"), _T("Arrow"), _T("Cross"), _T("Help"),
-			_T("IBeam"), _T("Icon"), _T("No"), _T("Size"),
-			_T("SizeAll"), _T("SizeNESW"), _T("SizeNS"),
-			_T("SizeNWSE"), _T("SizeWE"), _T("UpArrow"),
-			_T("Wait"), _T("Unknown")
-		};
-
-		// Find matching cursor
-		size_t i;
-		for (i = 0; i < cursor_count; ++i)
-			if (sCursor[i] == current_cursor)
-				break;
-
-		return sCursorName[i];
-	}
 
 	void queueTask(int delay, std::optional<std::function<void()>> function,
 		bool recursive);
@@ -235,6 +196,47 @@ public:
 std::vector<Keybind> Keybind::keybinds = {};
 
 namespace InputHandler {
+
+	LPCTSTR GetCursorType() {
+		HCURSOR current_cursor;
+		CURSORINFO ci;
+		ci.cbSize = sizeof(CURSORINFO);
+		current_cursor = GetCursorInfo(&ci) ? ci.hCursor : NULL;
+
+		if (!current_cursor)
+		{
+			return _T("Unknown");
+		}
+
+		static HCURSOR sCursor[] = {
+			LoadCursor(NULL, IDC_APPSTARTING), LoadCursor(NULL, IDC_ARROW),
+			LoadCursor(NULL, IDC_CROSS), LoadCursor(NULL, IDC_HELP),
+			LoadCursor(NULL, IDC_IBEAM), LoadCursor(NULL, IDC_ICON),
+			LoadCursor(NULL, IDC_NO), LoadCursor(NULL, IDC_SIZE),
+			LoadCursor(NULL, IDC_SIZEALL), LoadCursor(NULL, IDC_SIZENESW),
+			LoadCursor(NULL, IDC_SIZENS), LoadCursor(NULL, IDC_SIZENWSE),
+			LoadCursor(NULL, IDC_SIZEWE), LoadCursor(NULL, IDC_UPARROW),
+			LoadCursor(NULL, IDC_WAIT)
+		};
+
+		static const size_t cursor_count = sizeof(sCursor) / sizeof(sCursor[0]);
+
+		static LPCTSTR sCursorName[cursor_count + 1] = {
+			_T("AppStarting"), _T("Arrow"), _T("Cross"), _T("Help"),
+			_T("IBeam"), _T("Icon"), _T("No"), _T("Size"),
+			_T("SizeAll"), _T("SizeNESW"), _T("SizeNS"),
+			_T("SizeNWSE"), _T("SizeWE"), _T("UpArrow"),
+			_T("Wait"), _T("Unknown")
+		};
+
+		// Find matching cursor
+		size_t i;
+		for (i = 0; i < cursor_count; ++i)
+			if (sCursor[i] == current_cursor)
+				break;
+
+		return sCursorName[i];
+	}
 
 	bool getPhysicalKeyState(WORD vkCode) {
 		for (Keybind& keybind : Keybind::keybinds) {
@@ -463,6 +465,69 @@ namespace InputHandler {
 		}
 	}
 
+	class Coordinates {
+	public:
+		Coordinates(double x, double y) {
+			this->x = x;
+			this->y = y;
+		}
+		double x;
+		double y;
+	};
+
+	// Get the coordinates on the main screen for a certain x and y from 0 to 1
+	Coordinates getPixelCoordinates(double x, double y) {
+		DEVMODE devMode;
+		devMode.dmSize = sizeof(DEVMODE);
+		EnumDisplaySettings(NULL, ENUM_CURRENT_SETTINGS, &devMode);
+
+		int screenWidth = devMode.dmPelsWidth;
+		int screenHeight = devMode.dmPelsHeight;
+
+
+		double widescreenWidth = screenHeight * (16.0 / 9.0);
+		double offsetX = (screenWidth - widescreenWidth) / 2.0;
+
+		double pixelX = offsetX + (widescreenWidth * x);
+		double pixelY = screenHeight * y;
+
+		Coordinates pixelCoords = Coordinates(pixelX, pixelY);
+
+		return pixelCoords;
+	}
+
+	// Convert pixel coordinates back to normalized coordinates (0 to 1)
+	Coordinates getPixelCoordinatesReverse(double pixelX, double pixelY) {
+		DEVMODE devMode;
+		devMode.dmSize = sizeof(DEVMODE);
+		EnumDisplaySettings(NULL, ENUM_CURRENT_SETTINGS, &devMode);
+
+		int screenWidth = devMode.dmPelsWidth;
+		int screenHeight = devMode.dmPelsHeight;
+
+		double widescreenWidth = screenHeight * (16.0 / 9.0);
+		double offsetX = (screenWidth - widescreenWidth) / 2.0;
+
+		double x = (pixelX - offsetX) / widescreenWidth;
+		double y = pixelY / screenHeight;
+
+		Coordinates coordPercentages = Coordinates(x, y);
+
+		return coordPercentages;
+	}
+
+	// Move mouse cursor to normalized coordinates (0 to 1)
+	void moveToPixelCoordinates(double x, double y) {
+		Coordinates coords = getPixelCoordinates(x, y);
+		SetCursorPos(static_cast<int>(coords.x), static_cast<int>(coords.y));
+		std::cout << "Moving cursor to normalized coordinates: (" << x << ", " << y << ")" << std::endl;
+		std::cout << "Moving cursor to pixel coordinates: (" << coords.x << ", " << coords.y << ")" << std::endl;
+	}
+
+	void queueMouseMove(Coordinates coords, bool recursive) {
+		queueTask(0, [coords]() { moveToPixelCoordinates(coords.x, coords.y); }, recursive);
+	}
+
 	class TaskExecutor {
 	public:
 		~TaskExecutor() {
@@ -528,8 +593,7 @@ namespace InputHandler {
 				if (--firstTaskReference.delay < 0) {
 					firstTaskCopy = firstTaskReference;
 					queuedTasks.pop();
-				}
-				else {
+				} else {
 					break;
 				}
 			}
@@ -542,7 +606,7 @@ namespace InputHandler {
 		}
 	}
 
-	void prepareForIntMenu() { queueInputs({ "lbutton upR", "rbutton upR","m down" }); }
+	void prepareForIntMenu() { queueInputs({ "lbutton upR", "rbutton upR" }); }
 
 } // namespace InputHandler
 
@@ -603,7 +667,7 @@ void addKeybinds() { // Add keybinds here
 
 	new Keybind("q", []() {
 		InputHandler::queueInputs(
-			{ "4 down", "sleep 2", "2 down", "sleep 2", "tabR", "2 upR", "4 up" });
+			{ "4 down", "1 down", "tabR", "1 upR", "4 upR" });
 		});
 
 	/*
@@ -650,21 +714,15 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 			DWORD vkCode = pKeyBoard->vkCode;
 
 			for (Keybind& keybind : Keybind::keybinds) {
-				bool modifiersPressed =
-					keybind.modifiers.size() != 0 // Holy fucking auto formatter
-					? std::all_of(
-						keybind.modifiers.begin(), keybind.modifiers.end(),
-						[](std::string modifier) {
-							std::optional<WORD> key =
-								InputHandler::findKey(modifier);
+				bool modifiersPressed = keybind.modifiers.size() != 0 ? std::all_of(keybind.modifiers.begin(), keybind.modifiers.end(), [](std::string modifier) {
+							std::optional<WORD> key = InputHandler::findKey(modifier);
 							return InputHandler::getPhysicalKeyState(key.value());
-						})
-					: true;
-				if (vkCode == keybind.keyCode && !keybind.isPressed &&
-					modifiersPressed) {
+				}) : true;
+				if (vkCode == keybind.keyCode && !keybind.isPressed && modifiersPressed) {
 					keybind.isPressed = true;
-					if (!inChat)
+					if (!inChat) {
 						keybind.function();
+					}
 					return 1;
 				}
 			}
@@ -691,9 +749,7 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 }
 
 double previousFrametime = 0;
-int frameGenMultiplier =
-1; // For DLSS Frame Generation. This is completely fucking broken btw who
-// made this shitty application?
+int frameGenMultiplier = 1; // For DLSS Frame Generation
 int framesDetected = 0;
 static InputHandler::TaskExecutor taskExecutor;
 LARGE_INTEGER lastGenerated;
@@ -765,7 +821,7 @@ int main() {
 					WaitForSingleObject(hTimer, INFINITE);
 				}
 				QueryPerformanceCounter(&endTime);
-				printf("new frame, last frame was generated %fms ago\n", (endTime.QuadPart - currentTime.QuadPart) * 1000.0 / freq.QuadPart);
+				// printf("new frame, last frame was generated %fms ago\n", (endTime.QuadPart - currentTime.QuadPart) * 1000.0 / freq.QuadPart);
 			}
 		}
 		}).detach();
