@@ -454,7 +454,7 @@ namespace InputHandler {
 					continue;
 				}
 			}
-			
+
 
 			for (int i = 0; i < amount; i++) {
 				queueInput(vkCode, state, isRecursive);
@@ -593,7 +593,8 @@ namespace InputHandler {
 				if (--firstTaskReference.delay < 0) {
 					firstTaskCopy = firstTaskReference;
 					queuedTasks.pop();
-				} else {
+				}
+				else {
 					break;
 				}
 			}
@@ -612,63 +613,82 @@ namespace InputHandler {
 
 bool inChat = false;
 
+// macros
+#define CONCAT(a, b) a##b
+#define EXPAND_AND_CONCAT(a, b) CONCAT(a, b)
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+#define KEY_DOWN(k) k " down"
+#define KEY_DOWN_R(k) k " downR"
+#define KEY_UP(k) k " up"
+#define KEY_UP_R(k) k " upR"
+
+// ingame keybinds
+#define INT_MENU_KEYBIND m
+#define INT_MENU_KEY TOSTRING(INT_MENU_KEYBIND)
+#define INT_MENU_KEY_R TOSTRING(EXPAND_AND_CONCAT(INT_MENU_KEYBIND, R))
+
+#define RPG_KEY "2"
+#define STICKY_BOMB_KEY "4"
+#define WEAPON_KEY_1 "1"
+#define WEAPON_KEY_2 "3"
+#define WEAPON_KEY_3 "5"
+#define WEAPON_KEY_4 "6"
+#define WEAPON_KEY_5 "7"
+#define WEAPON_KEY_6 "8"
+
+// macro keybinds
+#define BST_KEY 220
+#define THERMAL_KEY 221
+#define SNACKS_KEY 186
+#define AMMO_KEY "F2"
+#define RPG_SPAM_KEY "q"
+
+
 void addKeybinds() { // Add keybinds here
-	// You can't type this keycode as a string so i just typed in the virtual
-	// keycode of it instead
-	new Keybind(220, []() {
+
+	new Keybind(BST_KEY, []() {
 		InputHandler::prepareForIntMenu();
-		InputHandler::queueInputs({ "mR", "enter down", "enter up", "enter downR",
+		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down", "enter up", "enter downR",
 								   "up 3", "enter up", "enter downR", "down down",
 								   "enter up", "down up" });
 		});
 
-	new Keybind(221,
-		[]() {
-			InputHandler::prepareForIntMenu();
-			InputHandler::queueInputs(
-				{ "mR", "enter down", "down 5", "enter up", "down downR",
-				 "enter down", "down up", "enter upR", "sleep 2",
-				 "space downR", "m down", "m upR", "space up" });
-		},
-		{ "shift" });
-
-	new Keybind(186,
-		[]() {
-			InputHandler::prepareForIntMenu();
-			InputHandler::queueInputs(
-				{ "mR", "enter down", "down 4", "enter up", "down downR",
-				 "enter down", "down up", "down", "enter up" });
-		},
-		{ "shift" });
-
-	new Keybind("F2", []() {
+	new Keybind(THERMAL_KEY, []() {
 		InputHandler::prepareForIntMenu();
-		InputHandler::queueInputs({ "mR", "enter down", "down 4", "enter up",
+		InputHandler::queueInputs(
+			{ INT_MENU_KEY_R, "enter down", "down 5", "enter up", "down downR",
+			 "enter down", "down up", "enter upR", "sleep 2",
+			 "space downR", KEY_DOWN(INT_MENU_KEY), KEY_UP_R(INT_MENU_KEY), "space up" });
+		},
+		{ "shift" });
+
+	new Keybind(SNACKS_KEY, []() {
+		InputHandler::prepareForIntMenu();
+		InputHandler::queueInputs(
+			{ INT_MENU_KEY_R, "enter down", "down 4", "enter up", "down downR",
+			 "enter down", "down up", "down", "enter up" });
+		},
+		{ "shift" });
+
+	new Keybind(AMMO_KEY, []() {
+		InputHandler::prepareForIntMenu();
+		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down", "down 4", "enter up",
 								   "enter", "enter", "enter downR",
 								   "up down", "enter up", "up up", "m" });
 		});
 
-	new Keybind("1",
-		[]() { InputHandler::queueInputs({ "1 down", "tabR", "1 up" }); });
-	new Keybind("2",
-		[]() { InputHandler::queueInputs({ "2 down", "tabR", "2 up" }); });
-	new Keybind("3",
-		[]() { InputHandler::queueInputs({ "3 down", "tabR", "3 up" }); });
-	new Keybind("4",
-		[]() { InputHandler::queueInputs({ "4 down", "tabR", "4 up" }); });
-	new Keybind("5",
-		[]() { InputHandler::queueInputs({ "5 down", "tabR", "5 up" }); });
-	new Keybind("6",
-		[]() { InputHandler::queueInputs({ "6 down", "tabR", "6 up" }); });
-	new Keybind("7",
-		[]() { InputHandler::queueInputs({ "7 down", "tabR", "7 up" }); });
-	new Keybind("8",
-		[]() { InputHandler::queueInputs({ "8 down", "tabR", "8 up" }); });
 
-	new Keybind("q", []() {
-		InputHandler::queueInputs(
-			{ "4 down", "1 down", "tabR", "1 upR", "4 upR" });
-		});
+	new Keybind(RPG_KEY, []() { InputHandler::queueInputs({ KEY_DOWN(RPG_KEY), "tabR", KEY_UP(RPG_KEY) }); });
+	new Keybind(STICKY_BOMB_KEY, []() { InputHandler::queueInputs({ KEY_DOWN(STICKY_BOMB_KEY), "tabR", KEY_UP(STICKY_BOMB_KEY) }); });
+	new Keybind(WEAPON_KEY_1, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_1), "tabR", KEY_UP(WEAPON_KEY_1) }); });
+	new Keybind(WEAPON_KEY_2, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_2), "tabR", KEY_UP(WEAPON_KEY_2) }); });
+	new Keybind(WEAPON_KEY_3, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_3), "tabR", KEY_UP(WEAPON_KEY_3) }); });
+	new Keybind(WEAPON_KEY_4, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_4), "tabR", KEY_UP(WEAPON_KEY_4) }); });
+	new Keybind(WEAPON_KEY_5, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_5), "tabR", KEY_UP(WEAPON_KEY_5) }); });
+	new Keybind(WEAPON_KEY_6, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_6), "tabR", KEY_UP(WEAPON_KEY_6) }); });
+
+	new Keybind(RPG_SPAM_KEY, []() { InputHandler::queueInputs({ KEY_DOWN(STICKY_BOMB_KEY), "sleep 2", KEY_DOWN(RPG_KEY), "tabR", KEY_UP_R(RPG_KEY), KEY_UP_R(STICKY_BOMB_KEY) });});
 
 	/*
 	Why is this so fucking inconsistent?
@@ -715,9 +735,9 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 
 			for (Keybind& keybind : Keybind::keybinds) {
 				bool modifiersPressed = keybind.modifiers.size() != 0 ? std::all_of(keybind.modifiers.begin(), keybind.modifiers.end(), [](std::string modifier) {
-							std::optional<WORD> key = InputHandler::findKey(modifier);
-							return InputHandler::getPhysicalKeyState(key.value());
-				}) : true;
+					std::optional<WORD> key = InputHandler::findKey(modifier);
+					return InputHandler::getPhysicalKeyState(key.value());
+					}) : true;
 				if (vkCode == keybind.keyCode && !keybind.isPressed && modifiersPressed) {
 					keybind.isPressed = true;
 					if (!inChat) {
