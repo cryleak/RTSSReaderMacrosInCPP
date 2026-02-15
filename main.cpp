@@ -629,20 +629,21 @@ bool inChat = false;
 #define INT_MENU_KEY_R TOSTRING(EXPAND_AND_CONCAT(INT_MENU_KEYBIND, R))
 
 #define RPG_KEY "2"
+#define SNIPER_KEY "1"
 #define STICKY_BOMB_KEY "4"
-#define WEAPON_KEY_1 "1"
-#define WEAPON_KEY_2 "3"
-#define WEAPON_KEY_3 "5"
-#define WEAPON_KEY_4 "6"
-#define WEAPON_KEY_5 "7"
-#define WEAPON_KEY_6 "8"
+#define WEAPON_KEY_1 "3"
+#define WEAPON_KEY_2 "5"
+#define WEAPON_KEY_3 "6"
+#define WEAPON_KEY_4 "7"
+#define WEAPON_KEY_5 "8"
 
 // macro keybinds
 #define BST_KEY 220
 #define THERMAL_KEY 221
 #define SNACKS_KEY 186
 #define AMMO_KEY "F2"
-#define RPG_SPAM_KEY "q"
+#define RPG_SPAM_KEY "f24" // i don't use this
+#define SNIPER_SPAM_KEY "q"
 
 
 void addKeybinds() { // Add keybinds here
@@ -681,14 +682,15 @@ void addKeybinds() { // Add keybinds here
 
 	new Keybind(RPG_KEY, []() { InputHandler::queueInputs({ KEY_DOWN(RPG_KEY), "tabR", KEY_UP(RPG_KEY) }); });
 	new Keybind(STICKY_BOMB_KEY, []() { InputHandler::queueInputs({ KEY_DOWN(STICKY_BOMB_KEY), "tabR", KEY_UP(STICKY_BOMB_KEY) }); });
+	new Keybind(SNIPER_KEY, []() { InputHandler::queueInputs({ KEY_DOWN(SNIPER_KEY), "tabR", KEY_UP(SNIPER_KEY) }); });
 	new Keybind(WEAPON_KEY_1, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_1), "tabR", KEY_UP(WEAPON_KEY_1) }); });
 	new Keybind(WEAPON_KEY_2, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_2), "tabR", KEY_UP(WEAPON_KEY_2) }); });
 	new Keybind(WEAPON_KEY_3, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_3), "tabR", KEY_UP(WEAPON_KEY_3) }); });
 	new Keybind(WEAPON_KEY_4, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_4), "tabR", KEY_UP(WEAPON_KEY_4) }); });
 	new Keybind(WEAPON_KEY_5, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_5), "tabR", KEY_UP(WEAPON_KEY_5) }); });
-	new Keybind(WEAPON_KEY_6, []() { InputHandler::queueInputs({ KEY_DOWN(WEAPON_KEY_6), "tabR", KEY_UP(WEAPON_KEY_6) }); });
 
 	new Keybind(RPG_SPAM_KEY, []() { InputHandler::queueInputs({ KEY_DOWN(STICKY_BOMB_KEY), "sleep 2", KEY_DOWN(RPG_KEY), "tabR", KEY_UP_R(RPG_KEY), KEY_UP_R(STICKY_BOMB_KEY) });});
+	new Keybind(SNIPER_SPAM_KEY, []() { InputHandler::queueInputs({ KEY_DOWN(STICKY_BOMB_KEY), KEY_DOWN(SNIPER_KEY), "tabR", KEY_UP_R(SNIPER_KEY), KEY_UP_R(STICKY_BOMB_KEY) }); });
 
 	/*
 	Why is this so fucking inconsistent?
@@ -713,6 +715,7 @@ void addKeybinds() { // Add keybinds here
 }
 
 HHOOK keyboardHook;
+HHOOK mouseHook;
 BYTE keybindKeyState[] = { 0 };
 
 LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
@@ -730,7 +733,6 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 		case WM_KEYDOWN:
 		case WM_SYSKEYDOWN: {
 			// lParam is a pointer to a KBDLLHOOKSTRUCT
-			KBDLLHOOKSTRUCT* pKeyBoard = (KBDLLHOOKSTRUCT*)lParam;
 			DWORD vkCode = pKeyBoard->vkCode;
 
 			for (Keybind& keybind : Keybind::keybinds) {
@@ -752,8 +754,7 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 
 		case WM_KEYUP:
 		case WM_SYSKEYUP: {
-			KBDLLHOOKSTRUCT* pKeyBoardUp = (KBDLLHOOKSTRUCT*)lParam;
-			DWORD vkCode = pKeyBoardUp->vkCode;
+			DWORD vkCode = pKeyBoard->vkCode;
 			for (Keybind& keybind : Keybind::keybinds) {
 				if (vkCode == keybind.keyCode) {
 					keybind.isPressed = false;
@@ -766,6 +767,69 @@ LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 		}
 	}
 	return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
+}
+
+LRESULT CALLBACK onMouseEvent(int nCode, WPARAM wParam, LPARAM lParam) {
+
+	if (nCode == HC_ACTION) {
+		MSLLHOOKSTRUCT* pMouse = (MSLLHOOKSTRUCT*)lParam;
+
+		if ((pMouse->flags & LLMHF_INJECTED) ||
+			getActiveProcessName() != RTSSReader::targetProcess) {
+			return CallNextHookEx(mouseHook, nCode, wParam, lParam);
+		}
+
+		DWORD vkCode = 0;
+
+		if (wParam == WM_LBUTTONDOWN || wParam == WM_LBUTTONUP) vkCode = VK_LBUTTON;
+		else if (wParam == WM_RBUTTONDOWN || wParam == WM_RBUTTONUP) vkCode = VK_RBUTTON;
+		else if (wParam == WM_MBUTTONDOWN || wParam == WM_MBUTTONUP) vkCode = VK_MBUTTON;
+		else if (wParam == WM_XBUTTONDOWN || wParam == WM_XBUTTONUP) {
+			WORD xButton = HIWORD(pMouse->mouseData);
+			if (xButton == XBUTTON1) vkCode = VK_XBUTTON1;
+			else if (xButton == XBUTTON2) vkCode = VK_XBUTTON2;
+		}
+
+		if (vkCode == 0) return CallNextHookEx(NULL, nCode, wParam, lParam);
+
+		switch (wParam) {
+
+		case WM_LBUTTONDOWN:
+		case WM_RBUTTONDOWN:
+		case WM_MBUTTONDOWN:
+		case WM_XBUTTONDOWN: {
+			for (Keybind& keybind : Keybind::keybinds) {
+				bool modifiersPressed = keybind.modifiers.size() != 0 ? std::all_of(keybind.modifiers.begin(), keybind.modifiers.end(), [](std::string modifier) {
+					std::optional<WORD> key = InputHandler::findKey(modifier);
+					return InputHandler::getPhysicalKeyState(key.value());
+					}) : true;
+
+				if (vkCode == keybind.keyCode && !keybind.isPressed && modifiersPressed) {
+					keybind.isPressed = true;
+					if (!inChat) {
+						keybind.function();
+					}
+					return 1;
+				}
+			}
+			break;
+		}
+
+		case WM_LBUTTONUP:
+		case WM_RBUTTONUP:
+		case WM_MBUTTONUP:
+		case WM_XBUTTONUP: {
+			for (Keybind& keybind : Keybind::keybinds) {
+				if (vkCode == keybind.keyCode) {
+					keybind.isPressed = false;
+					return 1;
+				}
+			}
+			break;
+		}
+		}
+	}
+	return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
 double previousFrametime = 0;
@@ -783,8 +847,9 @@ int main() {
 	}
 	keyboardHook =
 		SetWindowsHookEx(WH_KEYBOARD_LL, onKeyPress, GetModuleHandle(NULL), 0);
+	mouseHook = SetWindowsHookEx(WH_MOUSE_LL, onMouseEvent, GetModuleHandle(NULL), 0);
 
-	if (keyboardHook == NULL) {
+	if (keyboardHook == NULL || mouseHook == NULL) {
 		fprintf(stderr, "why cant i install the hook");
 		return 1;
 	}
