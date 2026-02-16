@@ -197,6 +197,8 @@ std::vector<Keybind> Keybind::keybinds = {};
 
 namespace InputHandler {
 
+	int tasksPerformed = 0;
+
 	LPCTSTR GetCursorType() {
 		HCURSOR current_cursor;
 		CURSORINFO ci;
@@ -274,9 +276,8 @@ namespace InputHandler {
 
 	void sendKeyInput(WORD vkCode, bool pressDown) {
 		INPUT input = { 0 };
-		// add specific handling for mousewheel and mouse buttons cause i was really
-		// lazy
-		if (vkCode == VK_LBUTTON || vkCode == VK_RBUTTON || vkCode == VK_MBUTTON) {
+		// add specific handling for mousewheel and mouse buttons cause i was really lazy
+		if (vkCode == VK_LBUTTON || vkCode == VK_RBUTTON || vkCode == VK_MBUTTON || vkCode == VK_XBUTTON1 || vkCode == VK_XBUTTON2) {
 			input.type = INPUT_MOUSE;
 			input.mi.time = 0;
 			input.mi.dwExtraInfo = 0;
@@ -286,12 +287,18 @@ namespace InputHandler {
 				input.mi.dwFlags = pressDown ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
 				break;
 			case VK_RBUTTON:
-				input.mi.dwFlags =
-					pressDown ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
+				input.mi.dwFlags = pressDown ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP;
 				break;
 			case VK_MBUTTON:
-				input.mi.dwFlags =
-					pressDown ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
+				input.mi.dwFlags = pressDown ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
+				break;
+			case VK_XBUTTON1:
+				input.mi.dwFlags = pressDown ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
+				input.mi.mouseData = XBUTTON1;
+				break;
+			case VK_XBUTTON2:
+				input.mi.dwFlags = pressDown ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP;
+				input.mi.mouseData = XBUTTON2;
 				break;
 			}
 			SendInput(1, &input, sizeof(INPUT));
@@ -302,8 +309,8 @@ namespace InputHandler {
 			input.mi.mouseData = (vkCode == 0x1001) ? WHEEL_DELTA : -WHEEL_DELTA;
 			input.mi.time = 0;
 			input.mi.dwExtraInfo = 0;
-			SendInput(1, &input, sizeof(INPUT));
-			input.mi.mouseData = 0;
+			input.mi.dx = 0;
+			input.mi.dy = 0;
 			SendInput(1, &input, sizeof(INPUT));
 		}
 		else {
@@ -365,11 +372,7 @@ namespace InputHandler {
 				0,
 				[vkCode, press]() {
 					sendKeyInput(vkCode, press);
-					printf("%.3f sending %hu, state: %d\n",
-						std::chrono::duration<double, std::milli>(
-							std::chrono::steady_clock::now().time_since_epoch())
-						.count(),
-						vkCode, press);
+					// printf("%.3f sending %hu, state: %d\n", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count(), vkCode, press);
 				},
 				recursiveInput);
 			};
@@ -425,7 +428,7 @@ namespace InputHandler {
 				}
 				vkCode = keyOpt.value();
 
-				printf("Key code for '%s': %hd\n", input.c_str(), vkCode);
+				// printf("Key code for '%s': %hd\n", input.c_str(), vkCode);
 			}
 
 			if (inputName == "wheelup" || inputName == "wheeldown") {
@@ -524,8 +527,8 @@ namespace InputHandler {
 		std::cout << "Moving cursor to pixel coordinates: (" << coords.x << ", " << coords.y << ")" << std::endl;
 	}
 
-	void queueMouseMove(Coordinates coords, bool recursive) {
-		queueTask(0, [coords]() { moveToPixelCoordinates(coords.x, coords.y); }, recursive);
+	void queueMouseMove(double x, double y, bool recursive) {
+		queueTask(0, [x, y]() { moveToPixelCoordinates(x, y); }, recursive);
 	}
 
 	class TaskExecutor {
@@ -602,6 +605,7 @@ namespace InputHandler {
 				firstTaskCopy.function.value()();
 			}
 			if (!firstTaskCopy.recursive) {
+				tasksPerformed++; // amount of frames done
 				break;
 			}
 		}
@@ -622,6 +626,8 @@ bool inChat = false;
 #define KEY_DOWN_R(k) k " downR"
 #define KEY_UP(k) k " up"
 #define KEY_UP_R(k) k " upR"
+
+#define USE_CURSOR_MACROS 1
 
 // ingame keybinds
 #define INT_MENU_KEYBIND m
@@ -646,13 +652,17 @@ bool inChat = false;
 #define SNIPER_SPAM_KEY "q"
 
 
-void addKeybinds() { // Add keybinds here
+void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
+
+	new Keybind("F3", []() {
+		InputHandler::queueInputs({ "WheelDown" });
+		});
 
 	new Keybind(BST_KEY, []() {
 		InputHandler::prepareForIntMenu();
 		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down", "enter up", "enter downR",
 								   "up 3", "enter up", "enter downR", "down down",
-								   "enter up", "down up" });
+								   "enter upR", "down upR" });
 		});
 
 	new Keybind(THERMAL_KEY, []() {
@@ -660,7 +670,7 @@ void addKeybinds() { // Add keybinds here
 		InputHandler::queueInputs(
 			{ INT_MENU_KEY_R, "enter down", "down 5", "enter up", "down downR",
 			 "enter down", "down up", "enter upR", "sleep 2",
-			 "space downR", KEY_DOWN(INT_MENU_KEY), KEY_UP_R(INT_MENU_KEY), "space up" });
+			 "space downR", INT_MENU_KEY_R, "space upR" });
 		},
 		{ "shift" });
 
@@ -673,10 +683,34 @@ void addKeybinds() { // Add keybinds here
 		{ "shift" });
 
 	new Keybind(AMMO_KEY, []() {
+		/*
+		POINT cursorPos;
+		GetCursorPos(&cursorPos);
+		InputHandler::Coordinates relativeCoords = InputHandler::getPixelCoordinatesReverse(cursorPos.x, cursorPos.y);
+		std::cout << "Cursor pixel coordinates: (" << relativeCoords.x << ", " << relativeCoords.y << ")" << std::endl;
+		*/
+
+#if USE_CURSOR_MACROS
+		// Instead of queueing a mouse move, we can just force the cursor to be positioned where we want it to be. Prevents any movement by the user as well.
+		InputHandler::Coordinates coords = InputHandler::getPixelCoordinates(0.0911458, 0.234259);
+		POINT p = { coords.x, coords.y };
+
+		RECT rect;
+		rect.left = p.x;
+		rect.right = p.x;
+		rect.top = p.y;
+		rect.bottom = p.y;
+		ClipCursor(&rect);
 		InputHandler::prepareForIntMenu();
-		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down", "down 4", "enter up",
-								   "enter", "enter", "enter downR",
-								   "up down", "enter up", "up up", "m" });
+
+		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down" });
+		// InputHandler::queueMouseMove(0.0911458, 0.234259, true);
+
+		InputHandler::queueInputs({ "lbutton down", "sleep", "lbutton up", "enter up", "enter 2", "enter downR", "up down", "enter upR", "up upR", "mR" });
+		InputHandler::queueTask(0, []() { ClipCursor(NULL); }, true);
+#else
+		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down", "down 4", "enter up", "enter 2", "enter downR", "up down", "enter upR", "up upR", "mR" });
+#endif
 		});
 
 
@@ -886,8 +920,8 @@ int main() {
 					//            freq.QuadPart);
 					// QueryPerformanceCounter(&lastGenerated);
 					framesDetected = 0;
-					taskExecutor.enqueue(
-						InputHandler::executeFirstQueuedTask); // Do this asynchronously
+					// taskExecutor.enqueue(InputHandler::executeFirstQueuedTask);
+					InputHandler::executeFirstQueuedTask();
 				}
 			}
 
@@ -896,6 +930,10 @@ int main() {
 			// the CPU but we should be doing it for very short time periods so it
 			// should be OK.
 			if (InputHandler::queuedTasks.empty()) {
+				if (InputHandler::tasksPerformed > 0) {
+					std::cout << "Frames taken to perform the task: " << InputHandler::tasksPerformed << std::endl;
+					InputHandler::tasksPerformed = 0;
+				}
 				LARGE_INTEGER dueTime;
 				dueTime.QuadPart = -(sleepTime * 10000LL);
 
