@@ -137,9 +137,8 @@ namespace RTSSReader {
 				if (applicationName.find(targetProcess) != std::string::npos) {
 					processEntryAddress = entryBaseAddr;
 
-					DWORD rawFrametime = *reinterpret_cast<DWORD*>(processEntryAddress +
-						frametimeMemoryOffset);
-					return static_cast<double>(rawFrametime) / 1000.0;
+					DWORD frametime = *reinterpret_cast<DWORD*>(processEntryAddress + frametimeMemoryOffset);
+					return static_cast<double>(frametime);
 				}
 			}
 		}
@@ -198,6 +197,7 @@ std::vector<Keybind> Keybind::keybinds = {};
 namespace InputHandler {
 
 	int tasksPerformed = 0;
+	static HKL usLayout = LoadKeyboardLayoutA("00000409", KLF_NOTELLSHELL);
 
 	LPCTSTR GetCursorType() {
 		HCURSOR current_cursor;
@@ -264,7 +264,7 @@ namespace InputHandler {
 		}
 
 		if (!vkCode.has_value()) {
-			SHORT vk = VkKeyScan(lowerCaseKey[0]);
+			SHORT vk = VkKeyScanExA(lowerCaseKey[0], usLayout);
 			if (vk == -1) {
 				printf("Failed to find keycode for: %s", lowerCaseKey.c_str());
 				return std::nullopt;
@@ -531,6 +531,22 @@ namespace InputHandler {
 		queueTask(0, [x, y]() { moveToPixelCoordinates(x, y); }, recursive);
 	}
 
+	void lockCursorTo(double x, double y) {
+		Coordinates coords = getPixelCoordinates(x, y);
+		POINT p = { coords.x, coords.y };
+
+		RECT rect;
+		rect.left = p.x;
+		rect.right = p.x;
+		rect.top = p.y;
+		rect.bottom = p.y;
+		ClipCursor(&rect);
+	}
+
+	void releaseCursor() {
+		ClipCursor(NULL);
+	}
+
 	class TaskExecutor {
 	public:
 		~TaskExecutor() {
@@ -611,7 +627,6 @@ namespace InputHandler {
 		}
 	}
 
-	void prepareForIntMenu() { queueInputs({ "lbutton upR", "rbutton upR" }); }
 
 } // namespace InputHandler
 
@@ -628,6 +643,7 @@ bool inChat = false;
 #define KEY_UP_R(k) k " upR"
 
 #define USE_CURSOR_MACROS 1
+#define REPRESS_LEFT_CLICK 1
 
 // ingame keybinds
 #define INT_MENU_KEYBIND m
@@ -651,22 +667,24 @@ bool inChat = false;
 #define RPG_SPAM_KEY "f24" // i don't use this
 #define SNIPER_SPAM_KEY "q"
 
+bool prepareForIntMenuAndCacheLeftClickState() {
+	InputHandler::queueInputs({ "lbutton upR", "rbutton upR" });
+	return InputHandler::getPhysicalKeyState(InputHandler::findKey("lbutton").value());
+}
+void ensureIntMenuClose() { InputHandler::queueInputs({ KEY_DOWN_R(INT_MENU_KEY), "sleep", KEY_UP_R(INT_MENU_KEY) }); }
+
 
 void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
 
-	new Keybind("F3", []() {
-		InputHandler::queueInputs({ "WheelDown" });
-		});
-
 	new Keybind(BST_KEY, []() {
-		InputHandler::prepareForIntMenu();
+		prepareForIntMenuAndCacheLeftClickState();
 		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down", "enter up", "enter downR",
 								   "up 3", "enter up", "enter downR", "down down",
 								   "enter upR", "down upR" });
 		});
 
 	new Keybind(THERMAL_KEY, []() {
-		InputHandler::prepareForIntMenu();
+		prepareForIntMenuAndCacheLeftClickState();
 		InputHandler::queueInputs(
 			{ INT_MENU_KEY_R, "enter down", "down 5", "enter up", "down downR",
 			 "enter down", "down up", "enter upR", "sleep 2",
@@ -675,7 +693,7 @@ void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
 		{ "shift" });
 
 	new Keybind(SNACKS_KEY, []() {
-		InputHandler::prepareForIntMenu();
+		prepareForIntMenuAndCacheLeftClickState();
 		InputHandler::queueInputs(
 			{ INT_MENU_KEY_R, "enter down", "down 4", "enter up", "down downR",
 			 "enter down", "down up", "down", "enter up" });
@@ -692,24 +710,26 @@ void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
 
 #if USE_CURSOR_MACROS
 		// Instead of queueing a mouse move, we can just force the cursor to be positioned where we want it to be. Prevents any movement by the user as well.
-		InputHandler::Coordinates coords = InputHandler::getPixelCoordinates(0.0911458, 0.234259);
-		POINT p = { coords.x, coords.y };
-
-		RECT rect;
-		rect.left = p.x;
-		rect.right = p.x;
-		rect.top = p.y;
-		rect.bottom = p.y;
-		ClipCursor(&rect);
-		InputHandler::prepareForIntMenu();
+		InputHandler::lockCursorTo(0.0911458, 0.234259);
+#if REPRESS_LEFT_CLICK
+		bool leftClickPressed =
+#endif
+			prepareForIntMenuAndCacheLeftClickState();
 
 		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down" });
 		// InputHandler::queueMouseMove(0.0911458, 0.234259, true);
 
-		InputHandler::queueInputs({ "lbutton down", "sleep", "lbutton up", "enter up", "enter 2", "enter downR", "up down", "enter upR", "up upR", "mR" });
-		InputHandler::queueTask(0, []() { ClipCursor(NULL); }, true);
+		InputHandler::queueInputs({ "lbutton down", "sleep", "lbutton up", "enter up", "enter 2", "enter downR", "up down", "enter upR", "up upR", });
+		ensureIntMenuClose();
+		InputHandler::queueTask(0, []() { InputHandler::releaseCursor(); }, true);
+#if REPRESS_LEFT_CLICK
+		if (leftClickPressed) {
+			InputHandler::queueInputs({ "lbutton downR" });
+		}
+#endif
 #else
-		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down", "down 4", "enter up", "enter 2", "enter downR", "up down", "enter upR", "up upR", "mR" });
+		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down", "down 4", "enter up", "enter 2", "enter downR", "up down", "enter upR", "up upR" });
+		ensureIntMenuClose();
 #endif
 		});
 
@@ -879,8 +899,7 @@ int main() {
 		fprintf(stderr, "why cant i set priorirtyt fck bro");
 		return 1;
 	}
-	keyboardHook =
-		SetWindowsHookEx(WH_KEYBOARD_LL, onKeyPress, GetModuleHandle(NULL), 0);
+	keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, onKeyPress, GetModuleHandle(NULL), 0);
 	mouseHook = SetWindowsHookEx(WH_MOUSE_LL, onMouseEvent, GetModuleHandle(NULL), 0);
 
 	if (keyboardHook == NULL || mouseHook == NULL) {
@@ -893,25 +912,19 @@ int main() {
 	std::thread([]() {
 		taskExecutor.start();
 		timeBeginPeriod(1);
-		HANDLE hTimer = CreateWaitableTimerEx(
-			NULL, NULL,
-			CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
-			TIMER_ALL_ACCESS
-		);
+		HANDLE hTimer = CreateWaitableTimerEx(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
 		if (hTimer == NULL) {
 			fprintf(stderr, "Failed to create high resolution timer.");
 			exit(1);
 		}
 		while (true) {
 			double frametime = RTSSReader::getRawFrametime().value_or(0);
-			if (frametime !=
-				previousFrametime) { // This doesn't work if you set an FPS cap
+			if (frametime != previousFrametime) { // This doesn't work if you set an FPS cap
 				// using RTSS but I couldn't find another way
 				// to do it so fuck it, this literally relies
 				// on frametime variance it's really funny
 				previousFrametime = frametime;
-				if (RTSSReader::targetProcess != "GTA5_Enhanced.exe" ||
-					++framesDetected == frameGenMultiplier) {
+				if (RTSSReader::targetProcess != "GTA5_Enhanced.exe" || ++framesDetected == frameGenMultiplier) {
 					// LARGE_INTEGER currentTime, freq;
 					// QueryPerformanceFrequency(&freq);
 					// QueryPerformanceCounter(&currentTime);
@@ -944,7 +957,7 @@ int main() {
 					WaitForSingleObject(hTimer, INFINITE);
 				}
 				QueryPerformanceCounter(&endTime);
-				// printf("new frame, last frame was generated %fms ago\n", (endTime.QuadPart - currentTime.QuadPart) * 1000.0 / freq.QuadPart);
+				// printf("new frame, last frame was generated %fms ago. Current frametime: %f\n", (endTime.QuadPart - currentTime.QuadPart) * 1000.0 / freq.QuadPart, frametime);
 			}
 		}
 		}).detach();
