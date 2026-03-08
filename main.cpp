@@ -96,16 +96,14 @@ namespace RTSSReader {
 			exit(1);
 		}
 		printf("%s\n", targetProcess.c_str());
-		const DWORD fileMapRead = 0x0004; // FILE_MAP_READ
 
-		hMapFile = OpenFileMappingW(fileMapRead, FALSE, L"RTSSSharedMemoryV2");
+		hMapFile = OpenFileMappingW(FILE_MAP_READ, FALSE, L"RTSSSharedMemoryV2");
 		if (!hMapFile) {
-			fprintf(stderr, "Could not open RTSS Shared Memory. Is "
-				"RivaTuner Statistics Server running?");
+			fprintf(stderr, "Could not open RTSS Shared Memory. Is RivaTuner Statistics Server running?");
 			exit(1);
 		}
 
-		pMapAddr = MapViewOfFile(hMapFile, fileMapRead, 0, 0, 0);
+		pMapAddr = MapViewOfFile(hMapFile, FILE_MAP_READ, 0, 0, 0);
 		if (!pMapAddr) {
 			CloseHandle(hMapFile);
 			fprintf(stderr, "Failed to map view of shared memory.");
@@ -114,13 +112,12 @@ namespace RTSSReader {
 		processEntryAddress = 0;
 	}
 
-	std::optional<double> getRawFrametime() {
+	double getRawFrametime() {
 		char* base = static_cast<char*>(pMapAddr);
 
 		if (processEntryAddress != 0) {
-			DWORD rawFrametime =
-				*reinterpret_cast<DWORD*>(processEntryAddress + frametimeMemoryOffset);
-			return static_cast<double>(rawFrametime) / 1000.0;
+			DWORD rawFrametime = *reinterpret_cast<DWORD*>(processEntryAddress + frametimeMemoryOffset);
+			return static_cast<double>(rawFrametime);
 		}
 		else {
 			DWORD dwAppEntrySize = *reinterpret_cast<DWORD*>(base + 8);
@@ -142,7 +139,7 @@ namespace RTSSReader {
 				}
 			}
 		}
-		return std::nullopt;
+		return 0;
 	}
 
 } // namespace RTSSReader
@@ -159,8 +156,7 @@ namespace InputHandler {
 		bool recursive;
 	};
 	void queueTask(Task task);
-	void queueInputs(std::vector<std::string> inputs,
-		std::function<void()> callback = nullptr);
+	void queueInputs(std::vector<std::string> inputs, std::function<void()> callback = nullptr);
 	extern std::queue<Task> queuedTasks;
 } // namespace InputHandler
 
@@ -171,11 +167,14 @@ public:
 		this->keyCode = keyCode;
 		this->isPressed = false;
 		this->modifiers = modifiers;
+		/*
 		this->function = [function]() {
 			if (InputHandler::queuedTasks.empty()) {
 				InputHandler::queueTask(0, function, false);
 			}
-			};
+		};
+		*/
+		this->function = function;
 		keybinds.push_back(*this);
 	}
 
@@ -547,58 +546,6 @@ namespace InputHandler {
 		ClipCursor(NULL);
 	}
 
-	class TaskExecutor {
-	public:
-		~TaskExecutor() {
-			if (worker.joinable()) {
-				{
-					std::unique_lock<std::mutex> lock(queue_mutex);
-					stop_thread = true;
-				}
-				condition.notify_one();
-				worker.join();
-			}
-		}
-
-		void start() { worker = std::thread(&TaskExecutor::loop, this); }
-
-		void enqueue(std::function<void()> task) {
-			{
-				std::unique_lock<std::mutex> lock(queue_mutex);
-				if (stop_thread) {
-					return;
-				}
-				tasks.push(std::move(task));
-			}
-			condition.notify_one();
-		}
-
-	private:
-		void loop() {
-			while (true) {
-				std::function<void()> task;
-				{
-					std::unique_lock<std::mutex> lock(queue_mutex);
-					condition.wait(lock, [this] { return !tasks.empty() || stop_thread; });
-
-					if (stop_thread && tasks.empty()) {
-						return;
-					}
-
-					task = std::move(tasks.front());
-					tasks.pop();
-				}
-
-				task();
-			}
-		}
-
-		std::thread worker;
-		std::queue<std::function<void()>> tasks;
-		std::mutex queue_mutex;
-		std::condition_variable condition;
-		bool stop_thread = false;
-	};
 
 	void executeFirstQueuedTask() {
 		while (true) {
@@ -889,7 +836,6 @@ LRESULT CALLBACK onMouseEvent(int nCode, WPARAM wParam, LPARAM lParam) {
 double previousFrametime = 0;
 int frameGenMultiplier = 1; // For DLSS Frame Generation
 int framesDetected = 0;
-static InputHandler::TaskExecutor taskExecutor;
 LARGE_INTEGER lastGenerated;
 constexpr long long sleepTime = 0.5; // in ms
 
@@ -910,7 +856,6 @@ int main() {
 	addKeybinds();
 
 	std::thread([]() {
-		taskExecutor.start();
 		timeBeginPeriod(1);
 		HANDLE hTimer = CreateWaitableTimerEx(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
 		if (hTimer == NULL) {
@@ -918,7 +863,7 @@ int main() {
 			exit(1);
 		}
 		while (true) {
-			double frametime = RTSSReader::getRawFrametime().value_or(0);
+			double frametime = RTSSReader::getRawFrametime();
 			if (frametime != previousFrametime) { // This doesn't work if you set an FPS cap
 				// using RTSS but I couldn't find another way
 				// to do it so fuck it, this literally relies
@@ -933,7 +878,6 @@ int main() {
 					//            freq.QuadPart);
 					// QueryPerformanceCounter(&lastGenerated);
 					framesDetected = 0;
-					// taskExecutor.enqueue(InputHandler::executeFirstQueuedTask);
 					InputHandler::executeFirstQueuedTask();
 				}
 			}
@@ -950,14 +894,9 @@ int main() {
 				LARGE_INTEGER dueTime;
 				dueTime.QuadPart = -(sleepTime * 10000LL);
 
-				LARGE_INTEGER currentTime, freq, endTime;
-				QueryPerformanceFrequency(&freq);
-				QueryPerformanceCounter(&currentTime);
 				if (SetWaitableTimer(hTimer, &dueTime, 0, NULL, NULL, FALSE)) { // This somehow lets me sleep with a precision of 0.5ms
 					WaitForSingleObject(hTimer, INFINITE);
 				}
-				QueryPerformanceCounter(&endTime);
-				// printf("new frame, last frame was generated %fms ago. Current frametime: %f\n", (endTime.QuadPart - currentTime.QuadPart) * 1000.0 / freq.QuadPart, frametime);
 			}
 		}
 		}).detach();
