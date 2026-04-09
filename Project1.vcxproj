@@ -131,6 +131,7 @@
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <ControlFlowGuard>false</ControlFlowGuard>
       <FloatingPointModel>Fast</FloatingPointModel>
+      <AdditionalIncludeDirectories>C:\Program Files (x86)\RivaTuner Statistics Server\SDK\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -158,6 +159,8 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\..\..\..\Program Files (x86)\RivaTuner Statistics Server\SDK\Include\RTSSHooksTypes.h" />
+    <ClInclude Include="..\..\..\..\..\Program Files (x86)\RivaTuner Statistics Server\SDK\Include\RTSSSharedMemory.h" />
     <ClInclude Include="keymap.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

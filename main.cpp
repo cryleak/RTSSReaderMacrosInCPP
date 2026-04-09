@@ -20,9 +20,43 @@
 #include <winnt.h>
 #include <winuser.h>
 #include <iostream>
+#include "RTSSSharedMemory.h"
 
 #pragma comment(lib, "winmm.lib")
 using namespace std::chrono_literals;
+
+#define WM_USER_REHOOK (WM_USER + 1)
+#define USE_MOUSE_WHEEL 1
+
+HHOOK keyboardHook;
+HHOOK mouseHook;
+WORD g_mainThreadId = 0;
+
+static bool isMainThread() {
+	return GetCurrentThreadId() == g_mainThreadId;
+}
+
+LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam);
+
+static bool addKeyboardHook() {
+	if (isMainThread()) {
+		keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, onKeyPress, GetModuleHandle(NULL), 0);
+		if (keyboardHook == NULL) {
+			return false;
+		}
+		return true;
+	}
+	else {
+		PostThreadMessage(g_mainThreadId, WM_USER_REHOOK, 0, 0);
+	}
+}
+
+static void removeKeyboardHook() {
+	if (keyboardHook) {
+		UnhookWindowsHookEx(keyboardHook);
+		keyboardHook = NULL;
+	}
+}
 
 std::string getActiveProcessName() {
 	HWND foregroundWindow = GetForegroundWindow();
@@ -77,12 +111,24 @@ bool isProcessRunning(const TCHAR* processName) {
 }
 
 namespace RTSSReader {
-	DWORD frametimeMemoryOffset = 280;
-	// DWORD framesGeneratedMemoryOffset = 332;
 	HANDLE hMapFile;
-	LPVOID pMapAddr;
-	uintptr_t processEntryAddress;
+	RTSS_SHARED_MEMORY* pMapAddr;
+	RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY* pTargetApp = nullptr;
 	std::string targetProcess;
+
+	bool findProcess(std::string name) {
+		if (!pMapAddr) return false;
+		char* appArray = (char*)pMapAddr + pMapAddr->dwAppArrOffset;
+
+		for (DWORD i = 0; i < pMapAddr->dwAppArrSize; ++i) {
+			auto entry = (RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY*)(appArray + (i * pMapAddr->dwAppEntrySize));
+			if (std::string(entry->szName).find(name) != std::string::npos) {
+				pTargetApp = entry;
+				return true;
+			}
+		}
+		return false;
+	}
 
 	void initialize() {
 		if (isProcessRunning(L"GTA5_Enhanced.exe")) {
@@ -103,43 +149,25 @@ namespace RTSSReader {
 			exit(1);
 		}
 
-		pMapAddr = MapViewOfFile(hMapFile, FILE_MAP_READ, 0, 0, 0);
+		pMapAddr = reinterpret_cast<RTSS_SHARED_MEMORY*>(MapViewOfFile(hMapFile, FILE_MAP_READ, 0, 0, 0));
 		if (!pMapAddr) {
 			CloseHandle(hMapFile);
 			fprintf(stderr, "Failed to map view of shared memory.");
 			exit(1);
 		}
-		processEntryAddress = 0;
+		if (!findProcess(targetProcess)) {
+			std::cerr << "Failed to find target process in RTSS shared memory. Is the game running and being monitored by RTSS?";
+			Sleep(2000);
+			exit(1);
+		}
 	}
 
-	double getRawFrametime() {
-		char* base = static_cast<char*>(pMapAddr);
 
-		if (processEntryAddress != 0) {
-			DWORD rawFrametime = *reinterpret_cast<DWORD*>(processEntryAddress + frametimeMemoryOffset);
-			return static_cast<double>(rawFrametime);
-		}
-		else {
-			DWORD dwAppEntrySize = *reinterpret_cast<DWORD*>(base + 8);
-			DWORD dwAppArrOffset = *reinterpret_cast<DWORD*>(base + 12);
-			DWORD dwAppArrSize = *reinterpret_cast<DWORD*>(base + 16);
+	template <typename T>
+	T getAppMember(size_t offset) {
+		if (!pTargetApp) return T();
 
-			for (DWORD i = 0; i < dwAppArrSize; ++i) {
-				uintptr_t entryBaseAddr = reinterpret_cast<uintptr_t>(base) +
-					dwAppArrOffset + (i * dwAppEntrySize);
-
-				char* appNamePtr = reinterpret_cast<char*>(entryBaseAddr + 4);
-				std::string applicationName(appNamePtr);
-
-				if (applicationName.find(targetProcess) != std::string::npos) {
-					processEntryAddress = entryBaseAddr;
-
-					DWORD frametime = *reinterpret_cast<DWORD*>(processEntryAddress + frametimeMemoryOffset);
-					return static_cast<double>(frametime);
-				}
-			}
-		}
-		return 0;
+		return *reinterpret_cast<T*>(reinterpret_cast<char*>(pTargetApp) + offset);
 	}
 
 } // namespace RTSSReader
@@ -162,19 +190,12 @@ namespace InputHandler {
 
 class Keybind {
 public:
-	Keybind(int keyCode, std::function<void()> function,
+	Keybind(int keyCode, std::function<void()> exec,
 		std::vector<std::string> modifiers = {}) {
 		this->keyCode = keyCode;
 		this->isPressed = false;
 		this->modifiers = modifiers;
-		/*
-		this->function = [function]() {
-			if (InputHandler::queuedTasks.empty()) {
-				InputHandler::queueTask(0, function, false);
-			}
-		};
-		*/
-		this->function = function;
+		this->function = exec;
 		keybinds.push_back(*this);
 	}
 
@@ -437,6 +458,7 @@ namespace InputHandler {
 			}
 
 			// Schizo up and down logic because it is faster
+#if USE_MOUSE_WHEEL
 			if (_tcscmp(GetCursorType(), _T("Unknown")) == 0) {
 				if ((inputName == "up" || inputName == "down") && amount != 1 &&
 					!state.has_value()) {
@@ -456,6 +478,7 @@ namespace InputHandler {
 					continue;
 				}
 			}
+#endif
 
 
 			for (int i = 0; i < amount; i++) {
@@ -485,7 +508,6 @@ namespace InputHandler {
 
 		int screenWidth = devMode.dmPelsWidth;
 		int screenHeight = devMode.dmPelsHeight;
-
 
 		double widescreenWidth = screenHeight * (16.0 / 9.0);
 		double offsetX = (screenWidth - widescreenWidth) / 2.0;
@@ -625,7 +647,7 @@ void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
 
 	new Keybind(BST_KEY, []() {
 		prepareForIntMenuAndCacheLeftClickState();
-		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down", "enter up", "enter downR",
+		InputHandler::queueInputs({ "enter downR", INT_MENU_KEY, "enter up", "enter downR",
 								   "up 3", "enter up", "enter downR", "down down",
 								   "enter upR", "down upR" });
 		});
@@ -633,7 +655,7 @@ void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
 	new Keybind(THERMAL_KEY, []() {
 		prepareForIntMenuAndCacheLeftClickState();
 		InputHandler::queueInputs(
-			{ INT_MENU_KEY_R, "enter down", "down 5", "enter up", "down downR",
+			{ "enter downR", INT_MENU_KEY, "down 5", "enter up", "down downR",
 			 "enter down", "down up", "enter upR", "sleep 2",
 			 "space downR", INT_MENU_KEY_R, "space upR" });
 		},
@@ -648,25 +670,30 @@ void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
 		{ "shift" });
 
 	new Keybind(AMMO_KEY, []() {
+		
 		/*
 		POINT cursorPos;
 		GetCursorPos(&cursorPos);
 		InputHandler::Coordinates relativeCoords = InputHandler::getPixelCoordinatesReverse(cursorPos.x, cursorPos.y);
-		std::cout << "Cursor pixel coordinates: (" << relativeCoords.x << ", " << relativeCoords.y << ")" << std::endl;
+		std::cout << "Cursor normalized coordinates: (" << relativeCoords.x << ", " << relativeCoords.y << ")" << std::endl;
+		std::cout << "Cursor actual coordinates: (" << cursorPos.x << ", " << cursorPos.y << ")" << std::endl;
+		return;
 		*/
+		
 
 #if USE_CURSOR_MACROS
 		// Instead of queueing a mouse move, we can just force the cursor to be positioned where we want it to be. Prevents any movement by the user as well.
-		InputHandler::lockCursorTo(0.0911458, 0.234259);
+		InputHandler::lockCursorTo(0.10625, 0.284259);
 #if REPRESS_LEFT_CLICK
 		bool leftClickPressed =
 #endif
 			prepareForIntMenuAndCacheLeftClickState();
 
-		InputHandler::queueInputs({ INT_MENU_KEY_R, "enter down" });
+		InputHandler::queueInputs({ "enter downR", INT_MENU_KEY});
 		// InputHandler::queueMouseMove(0.0911458, 0.234259, true);
 
-		InputHandler::queueInputs({ "lbutton down", "sleep", "lbutton up", "enter up", "enter 2", "enter downR", "up down", "enter upR", "up upR", });
+		// For some reason, left clicking in 2 frames is quite inconsistent. You can make the int menu keypress recursive, but then it will sometimes shoot your weapon.
+		InputHandler::queueInputs({ "lbutton down", "sleep", "lbutton up", "enter up", "enter 2", "enter downR", "up down", "enter upR", "up upR",});
 		ensureIntMenuClose();
 		InputHandler::queueTask(0, []() { InputHandler::releaseCursor(); }, true);
 #if REPRESS_LEFT_CLICK
@@ -714,16 +741,13 @@ void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
 	});
 	*/
 }
-
-HHOOK keyboardHook;
-HHOOK mouseHook;
 BYTE keybindKeyState[] = { 0 };
 
 LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 	if (nCode == HC_ACTION) {
 		KBDLLHOOKSTRUCT* pKeyBoard = (KBDLLHOOKSTRUCT*)lParam;
 
-		// Check if the key event was injected (sent by SendInput() or something
+		// Check if the key event was injected (sent by SendInput() or something)
 		// idfk how this works bro
 		if (pKeyBoard->flags & LLKHF_INJECTED ||
 			getActiveProcessName() != RTSSReader::targetProcess) {
@@ -833,19 +857,19 @@ LRESULT CALLBACK onMouseEvent(int nCode, WPARAM wParam, LPARAM lParam) {
 	return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
-double previousFrametime = 0;
+uint64_t previousPresentTime = 0;
 int frameGenMultiplier = 1; // For DLSS Frame Generation
 int framesDetected = 0;
 LARGE_INTEGER lastGenerated;
 constexpr long long sleepTime = 0.5; // in ms
 
-
 int main() {
+	g_mainThreadId = GetCurrentThreadId();
 	if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
 		fprintf(stderr, "why cant i set priorirtyt fck bro");
 		return 1;
 	}
-	keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, onKeyPress, GetModuleHandle(NULL), 0);
+	addKeyboardHook();
 	mouseHook = SetWindowsHookEx(WH_MOUSE_LL, onMouseEvent, GetModuleHandle(NULL), 0);
 
 	if (keyboardHook == NULL || mouseHook == NULL) {
@@ -856,6 +880,7 @@ int main() {
 	addKeybinds();
 
 	std::thread([]() {
+		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 		timeBeginPeriod(1);
 		HANDLE hTimer = CreateWaitableTimerEx(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
 		if (hTimer == NULL) {
@@ -863,12 +888,11 @@ int main() {
 			exit(1);
 		}
 		while (true) {
-			double frametime = RTSSReader::getRawFrametime();
-			if (frametime != previousFrametime) { // This doesn't work if you set an FPS cap
-				// using RTSS but I couldn't find another way
-				// to do it so fuck it, this literally relies
-				// on frametime variance it's really funny
-				previousFrametime = frametime;
+			// qwPresentStartTime or qwPresentEndTime, haven't really tested which one is more consistent or if there's any difference at all.
+			uint64_t presentTime = RTSSReader::getAppMember<uint64_t>(offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwPresentEndTime));
+
+			if (presentTime != previousPresentTime) {
+				previousPresentTime = presentTime;
 				if (RTSSReader::targetProcess != "GTA5_Enhanced.exe" || ++framesDetected == frameGenMultiplier) {
 					// LARGE_INTEGER currentTime, freq;
 					// QueryPerformanceFrequency(&freq);
@@ -903,6 +927,10 @@ int main() {
 
 	MSG msg;
 	while (GetMessage(&msg, NULL, 0, 0)) {
+		if (msg.message == WM_USER_REHOOK) {
+			addKeyboardHook();
+			continue;
+		}
 		TranslateMessage(&msg);
 		DispatchMessage(&msg);
 	}
