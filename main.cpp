@@ -130,6 +130,31 @@ namespace RTSSReader {
 		return false;
 	}
 
+	bool isTargetAppStillRunning() {
+		if (!pTargetApp) return true; // haven't found it yet so just assume it's still running I guess
+		 
+		DWORD pid = pTargetApp->dwProcessID;
+		if (pid == 0) return false;
+
+		static ULONGLONG lastKernelCheck = 0;
+		ULONGLONG now = GetTickCount64();
+
+		// Don't switch from user mode to kernel mode every time since it's quite slow and it doesn't matter to check this every single time we call this method, we can just check every second or so
+		if (now - lastKernelCheck > 1000) {
+			lastKernelCheck = now;
+			HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+			if (process) {
+				DWORD exitCode;
+				bool active = (GetExitCodeProcess(process, &exitCode) && exitCode == STILL_ACTIVE);
+				CloseHandle(process);
+				return active;
+			}
+			return false;
+		}
+
+		return true;
+	}
+
 	void initialize() {
 		if (isProcessRunning(L"GTA5_Enhanced.exe")) {
 			targetProcess = "GTA5_Enhanced.exe";
@@ -914,6 +939,13 @@ int main() {
 				if (InputHandler::tasksPerformed > 0) {
 					std::cout << "Frames taken to perform the task: " << InputHandler::tasksPerformed << std::endl;
 					InputHandler::tasksPerformed = 0;
+				}
+
+				if (!RTSSReader::isTargetAppStillRunning()) {
+					removeKeyboardHook();
+					std::cerr << "Target app is no longer running. Exiting..." << std::endl;
+					MessageBoxA(NULL, "Target app is no longer running. Restart the macros because I can't be asked to write handling for this.", "Error", MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND | MB_SYSTEMMODAL);
+					exit(0);
 				}
 				LARGE_INTEGER dueTime;
 				dueTime.QuadPart = -(sleepTime * 10000LL);
