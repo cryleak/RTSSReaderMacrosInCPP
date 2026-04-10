@@ -1,19 +1,19 @@
-#include "KeyboardHookHandler.h"
+#include "HookHandler.h"
 #include "RTSSReader.h"
 #include <Psapi.h>
 #include "Keybind.h"
 #include <optional>
 #include "InputHandler.h"
 
-KeyboardHookHandler::KeyboardHookHandler() {
+HookHandler::HookHandler() {
 	g_mainThreadId = GetCurrentThreadId();
 }
 
-bool KeyboardHookHandler::isMainThread() {
+bool HookHandler::isMainThread() {
 	return GetCurrentThreadId() == g_mainThreadId;
 }
 
-bool KeyboardHookHandler::addKeyboardHook() {
+bool HookHandler::addKeyboardHook() {
 	if (isMainThread()) {
 		keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, onKeyPress, GetModuleHandle(NULL), 0);
 		return keyboardHook != NULL;
@@ -23,14 +23,14 @@ bool KeyboardHookHandler::addKeyboardHook() {
 	}
 }
 
-void KeyboardHookHandler::removeKeyboardHook() {
+void HookHandler::removeKeyboardHook() {
 	if (keyboardHook) {
 		UnhookWindowsHookEx(keyboardHook);
 		keyboardHook = NULL;
 	}
 }
 
-bool KeyboardHookHandler::addMouseHook() {
+bool HookHandler::addMouseHook() {
 	if (isMainThread()) {
 		mouseHook = SetWindowsHookEx(WH_MOUSE_LL, onMouseEvent, GetModuleHandle(NULL), 0);
 		return mouseHook != NULL;
@@ -40,14 +40,14 @@ bool KeyboardHookHandler::addMouseHook() {
 	}
 }
 
-void KeyboardHookHandler::removeMouseHook() {
+void HookHandler::removeMouseHook() {
 	if (mouseHook) {
 		UnhookWindowsHookEx(mouseHook);
 		mouseHook = NULL;
 	}
 }
 
-std::string KeyboardHookHandler::getActiveProcessName() {
+std::string HookHandler::getActiveProcessName() {
 	HWND foregroundWindow = GetForegroundWindow();
 	if (foregroundWindow == NULL) {
 		return "No active window";
@@ -80,12 +80,12 @@ std::string KeyboardHookHandler::getActiveProcessName() {
 	return std::string(fullPath.begin(), fullPath.end());
 }
 
-bool KeyboardHookHandler::isChatRelatedKey(DWORD vkCode) {
+bool HookHandler::isChatRelatedKey(DWORD vkCode) {
 	return vkCode == InputHandler::getInstance().findKey(CHAT_KEYBIND).value() ||
 		vkCode == VK_RETURN || vkCode == VK_ESCAPE;
 }
 
-LRESULT CALLBACK KeyboardHookHandler::onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK HookHandler::onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 	if (nCode == HC_ACTION) {
 		KBDLLHOOKSTRUCT* pKeyBoard = (KBDLLHOOKSTRUCT*)lParam;
 
@@ -132,7 +132,7 @@ LRESULT CALLBACK KeyboardHookHandler::onKeyPress(int nCode, WPARAM wParam, LPARA
 	return CallNextHookEx(getInstance().keyboardHook, nCode, wParam, lParam);
 }
 
-LRESULT CALLBACK KeyboardHookHandler::onMouseEvent(int nCode, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK HookHandler::onMouseEvent(int nCode, WPARAM wParam, LPARAM lParam) {
 
 	if (nCode == HC_ACTION) {
 		MSLLHOOKSTRUCT* pMouse = (MSLLHOOKSTRUCT*)lParam;
@@ -195,7 +195,7 @@ LRESULT CALLBACK KeyboardHookHandler::onMouseEvent(int nCode, WPARAM wParam, LPA
 	return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
-void KeyboardHookHandler::rehook() {
+void HookHandler::rehook() {
 	removeKeyboardHook();
 	removeMouseHook();
 	addKeyboardHook();

@@ -23,7 +23,7 @@
 #include "RTSSReader.h"
 #include "Keybind.h"
 #include "InputHandler.h"
-#include "KeyboardHookHandler.h"
+#include "HookHandler.h"
 
 #pragma comment(lib, "winmm.lib")
 using namespace std::chrono_literals;
@@ -157,17 +157,17 @@ void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
 
 	if (RTSSReader::getInstance().targetProcess != "GTA5_Enhanced.exe") {
 		new Keybind(CHAT_KEYBIND, []() {
-			KeyboardHookHandler::getInstance().inChat = true;
+			HookHandler::getInstance().inChat = true;
 			InputHandler::getInstance().queueInputs({ CHAT_KEYBIND });
 			});
 
 		new Keybind("esc", []() {
-			KeyboardHookHandler::getInstance().inChat = false;
+			HookHandler::getInstance().inChat = false;
 			InputHandler::getInstance().queueInputs({ "esc" });
 			});
 
 		new Keybind("enter", []() {
-			KeyboardHookHandler::getInstance().inChat = false;
+			HookHandler::getInstance().inChat = false;
 			InputHandler::getInstance().queueInputs({ "enter" });
 			});
 	}
@@ -206,7 +206,7 @@ int main() {
 		return 1;
 	}
 
-	if (!KeyboardHookHandler::getInstance().addKeyboardHook() || !KeyboardHookHandler::getInstance().addMouseHook()) {
+	if (!HookHandler::getInstance().addKeyboardHook() || !HookHandler::getInstance().addMouseHook()) {
 		std::cerr << "Failed to install the hook." << std::endl;
 		return 1;
 	}
@@ -244,11 +244,12 @@ int main() {
 					InputHandler::getInstance().tasksPerformed = 0;
 
 					lastHookTime = GetTickCount64();
-					KeyboardHookHandler::getInstance().rehook();
+					HookHandler::getInstance().rehook();
 				}
 
 				if (!RTSSReader::getInstance().isTargetAppStillRunning()) {
-					KeyboardHookHandler::getInstance().removeKeyboardHook();
+					HookHandler::getInstance().removeKeyboardHook();
+					HookHandler::getInstance().removeMouseHook();
 					std::cerr << "Target app is no longer running. Exiting..." << std::endl;
 					MessageBoxA(NULL, "Target app is no longer running. Restart the macros because I can't be asked to write handling for this.", "Error", MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND | MB_SYSTEMMODAL);
 					exit(0);
@@ -256,7 +257,7 @@ int main() {
 
 				if (GetTickCount64() - lastHookTime >= 5000) { // Reinstall keyboard hook every 5 seconds or when tasks are finished. 
 					lastHookTime = GetTickCount64();
-					KeyboardHookHandler::getInstance().rehook();
+					HookHandler::getInstance().rehook();
 				}
 
 				LARGE_INTEGER dueTime;
@@ -274,10 +275,10 @@ int main() {
 	MSG msg;
 	while (GetMessage(&msg, NULL, 0, 0)) {
 		if (msg.message == WM_USER_REHOOK_KEYBOARD) {
-			KeyboardHookHandler::getInstance().addKeyboardHook();
+			HookHandler::getInstance().addKeyboardHook();
 			continue;
 		} else if (msg.message == WM_USER_REHOOK_MOUSE) {
-			KeyboardHookHandler::getInstance().addMouseHook();
+			HookHandler::getInstance().addMouseHook();
 			continue;
 		}
 		TranslateMessage(&msg);

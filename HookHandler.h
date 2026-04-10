@@ -1,4 +1,5 @@
 #pragma once
+
 #include <windows.h>
 #include <string>
 
@@ -6,10 +7,10 @@
 #define WM_USER_REHOOK_MOUSE (WM_USER + 2)
 #define CHAT_KEYBIND "t"
 
-class KeyboardHookHandler {
+class HookHandler {
 public:
-	static KeyboardHookHandler& getInstance() {
-		static KeyboardHookHandler instance;
+	static HookHandler& getInstance() {
+		static HookHandler instance;
 		return instance;
 	}
 
@@ -23,10 +24,10 @@ public:
 
 	bool inChat = false;
 private:
-	KeyboardHookHandler();
-	~KeyboardHookHandler() = default;
-	KeyboardHookHandler(const KeyboardHookHandler&) = delete;
-	void operator=(const KeyboardHookHandler&) = delete;
+	HookHandler();
+	~HookHandler() = default;
+	HookHandler(const HookHandler&) = delete;
+	void operator=(const HookHandler&) = delete;
 	static LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK onMouseEvent(int nCode, WPARAM wParam, LPARAM lParam);
 	bool isMainThread();

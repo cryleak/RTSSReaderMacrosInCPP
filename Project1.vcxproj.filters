@@ -30,7 +30,7 @@
     <ClCompile Include="Keybind.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="KeyboardHookHandler.cpp">
+    <ClCompile Include="HookHandler.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -53,7 +53,7 @@
     <ClInclude Include="RTSSReader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="KeyboardHookHandler.h">
+    <ClInclude Include="HookHandler.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

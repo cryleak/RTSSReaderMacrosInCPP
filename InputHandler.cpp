@@ -3,7 +3,7 @@
 #include "keymap.h"
 #include <iostream>
 #include <algorithm>
-#include "KeyboardHookHandler.h"
+#include "HookHandler.h"
 #include <iomanip>
 
 InputHandler::InputHandler()
