@@ -113,7 +113,6 @@ LRESULT CALLBACK KeyboardHookHandler::onKeyPress(int nCode, WPARAM wParam, LPARA
 					return 1;
 				}
 			}
-			// printf("Key Down: %lu\n", vkCode);
 			break;
 		}
 
@@ -126,7 +125,6 @@ LRESULT CALLBACK KeyboardHookHandler::onKeyPress(int nCode, WPARAM wParam, LPARA
 					return 1;
 				}
 			}
-			// printf("Key Up: %lu\n", vkCode);
 			break;
 		}
 		}

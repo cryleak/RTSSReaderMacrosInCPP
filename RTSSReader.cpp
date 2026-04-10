@@ -11,14 +11,14 @@ RTSSReader::RTSSReader() {
         targetProcess = "GTA5.exe";
     }
     else {
-        fprintf(stderr, "Could not find GTA process.\n");
+        std::cerr << "Could not find GTA process." << std::endl;
         Sleep(2000);
         exit(1);
     }
 
     hMapFile = OpenFileMappingW(FILE_MAP_READ, FALSE, L"RTSSSharedMemoryV2");
     if (!hMapFile) {
-        fprintf(stderr, "Could not open RTSS Shared Memory.\n");
+        std::cerr << "Could not open RTSS Shared Memory." << std::endl;
         Sleep(2000);
         exit(1);
     }
@@ -26,7 +26,7 @@ RTSSReader::RTSSReader() {
     pMapAddr = reinterpret_cast<RTSS_SHARED_MEMORY*>(MapViewOfFile(hMapFile, FILE_MAP_READ, 0, 0, 0));
     if (!pMapAddr) {
         CloseHandle(hMapFile);
-        fprintf(stderr, "Failed to map view of shared memory.\n");
+        std::cerr << "Failed to map view of shared memory." << std::endl;
         Sleep(2000);
         exit(1);
     }
@@ -36,6 +36,7 @@ RTSSReader::RTSSReader() {
         Sleep(2000);
         exit(1);
     }
+	std::cout << "RTSS reader initialized successfully for process: " << targetProcess << std::endl;
 }
 
 RTSSReader::~RTSSReader() {

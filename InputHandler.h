@@ -14,7 +14,6 @@
 
 class InputHandler {
 public:
-    // Singleton access
     static InputHandler& getInstance() {
         static InputHandler instance;
         return instance;
@@ -32,7 +31,6 @@ public:
         Coordinates(double x, double y) : x(x), y(y) {}
     };
 
-    // Public API
     void queueTask(Task task);
     void queueTask(int delay, std::optional<std::function<void()>> function, bool recursive);
     void queueInput(WORD vkCode, std::optional<bool> state, bool recursive);
@@ -52,19 +50,16 @@ public:
     std::queue<Task> queuedTasks;
 
 private:
-    // Private Constructor/Destructor for Singleton
     InputHandler();
     ~InputHandler() = default;
     InputHandler(const InputHandler&) = delete;
     void operator=(const InputHandler&) = delete;
 
-    // Internal Helpers
     LPCTSTR GetCursorType();
     Coordinates getPixelCoordinates(double x, double y);
     Coordinates getPixelCoordinatesReverse(double pixelX, double pixelY);
     void moveToPixelCoordinates(double x, double y);
 
-    // Members
     HKL usLayout;
     std::mutex queuedTasksMutex;
     std::regex inputPattern;

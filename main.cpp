@@ -39,7 +39,7 @@ using namespace std::chrono_literals;
 #define KEY_UP_R(k) k " upR"
 
 #define USE_CURSOR_MACROS 1
-#define REPRESS_LEFT_CLICK 0
+#define REPRESS_LEFT_CLICK 1
 
 // ingame keybinds
 #define INT_MENU_KEYBIND m
@@ -183,7 +183,6 @@ void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
 
 			  if (InputHandler::getInstance().getPhysicalKeyState(keyCode.value())) {
 
-				printf("requeuing");
 				InputHandler::getInstance().queueTask(0, [&self]() { self(self); }, true);
 			  }
 			});
@@ -203,23 +202,24 @@ constexpr long long sleepTime = 0.5; // in ms
 
 int main() {
 	if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
-		fprintf(stderr, "why cant i set priorirtyt fck bro");
+		std::cerr << "Failed to set process priority." << std::endl;
 		return 1;
 	}
 
 	if (!KeyboardHookHandler::getInstance().addKeyboardHook() || !KeyboardHookHandler::getInstance().addMouseHook()) {
-		fprintf(stderr, "why cant i install the hook");
+		std::cerr << "Failed to install the hook." << std::endl;
 		return 1;
 	}
 	RTSSReader::getInstance(); // initalize
 	addKeybinds();
+	std::cout << "Keybinds initalized successfully." << std::endl;
 
 	std::thread([]() {
 		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 		timeBeginPeriod(1);
 		HANDLE hTimer = CreateWaitableTimerEx(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
 		if (hTimer == NULL) {
-			fprintf(stderr, "Failed to create high resolution timer.");
+			std::cerr << "Failed to create high resolution timer." << std::endl;
 			exit(1);
 		}
 		static ULONGLONG lastHookTime = 0;
@@ -268,6 +268,8 @@ int main() {
 			}
 		}
 		}).detach();
+
+	std::cout << "Initialization complete." << std::endl;
 
 	MSG msg;
 	while (GetMessage(&msg, NULL, 0, 0)) {
