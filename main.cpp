@@ -28,7 +28,6 @@
 using namespace std::chrono_literals;
 
 #define WM_USER_REHOOK (WM_USER + 1)
-#define USE_MOUSE_WHEEL 1
 
 HHOOK keyboardHook;
 HHOOK mouseHook;
