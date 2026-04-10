@@ -24,6 +24,7 @@
 #include "Keybind.h"
 #include "InputHandler.h"
 #include "HookHandler.h"
+#include "Utils.h"
 
 #pragma comment(lib, "winmm.lib")
 using namespace std::chrono_literals;
@@ -213,6 +214,11 @@ int main() {
 	RTSSReader::getInstance(); // initalize
 	addKeybinds();
 	std::cout << "Keybinds initalized successfully." << std::endl;
+	if (!SetProcessPriorityByName(std::wstring(RTSSReader::getInstance().targetProcess.begin(), RTSSReader::getInstance().targetProcess.end()), HIGH_PRIORITY_CLASS)) {
+		std::cerr << "Failed to set process priority of " << RTSSReader::getInstance().targetProcess << "." << std::endl;
+		return 1;
+	}
+	std::cout << "GTA's process priority set successfully." << std::endl;
 
 	std::thread([]() {
 		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);

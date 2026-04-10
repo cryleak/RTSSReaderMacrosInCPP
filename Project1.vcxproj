@@ -162,6 +162,7 @@
       <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <ClCompile Include="RTSSReader.cpp" />
+    <ClCompile Include="Utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\..\..\Program Files (x86)\RivaTuner Statistics Server\SDK\Include\RTSSHooksTypes.h" />
@@ -171,6 +172,7 @@
     <ClInclude Include="HookHandler.h" />
     <ClInclude Include="keymap.h" />
     <ClInclude Include="RTSSReader.h" />
+    <ClInclude Include="Utils.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
