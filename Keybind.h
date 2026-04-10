@@ -12,6 +12,7 @@ public:
 	Keybind(const std::string& key, std::function<void()> function, std::vector<std::string> modifiers = {});
 
 	static std::vector<Keybind> keybinds;
+	static double keybindStartTime;
 	bool isPressed;
 	DWORD keyCode;
 	std::function<void()> function;

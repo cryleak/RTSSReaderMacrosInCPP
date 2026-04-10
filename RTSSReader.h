@@ -16,8 +16,6 @@ public:
     RTSSReader(const RTSSReader&) = delete;
     void operator=(const RTSSReader&) = delete;
 
-    // Public API
-    void initialize();
     bool isTargetAppStillRunning();
 
     // Template must stay in the header

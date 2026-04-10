@@ -3,7 +3,40 @@
 #include <TlHelp32.h>
 #include <tchar.h>
 
-RTSSReader::RTSSReader() {}
+RTSSReader::RTSSReader() {
+    if (isProcessRunning(L"GTA5_Enhanced.exe")) {
+        targetProcess = "GTA5_Enhanced.exe";
+    }
+    else if (isProcessRunning(L"GTA5.exe")) {
+        targetProcess = "GTA5.exe";
+    }
+    else {
+        fprintf(stderr, "Could not find GTA process.\n");
+        Sleep(2000);
+        exit(1);
+    }
+
+    hMapFile = OpenFileMappingW(FILE_MAP_READ, FALSE, L"RTSSSharedMemoryV2");
+    if (!hMapFile) {
+        fprintf(stderr, "Could not open RTSS Shared Memory.\n");
+        Sleep(2000);
+        exit(1);
+    }
+
+    pMapAddr = reinterpret_cast<RTSS_SHARED_MEMORY*>(MapViewOfFile(hMapFile, FILE_MAP_READ, 0, 0, 0));
+    if (!pMapAddr) {
+        CloseHandle(hMapFile);
+        fprintf(stderr, "Failed to map view of shared memory.\n");
+        Sleep(2000);
+        exit(1);
+    }
+
+    if (!findProcess(targetProcess)) {
+        std::cerr << "Failed to find target process in RTSS.\n";
+        Sleep(2000);
+        exit(1);
+    }
+}
 
 RTSSReader::~RTSSReader() {
     if (pMapAddr) UnmapViewOfFile(pMapAddr);
@@ -62,36 +95,4 @@ bool RTSSReader::isTargetAppStillRunning() {
         return false;
     }
     return true;
-}
-
-void RTSSReader::initialize() {
-    if (isProcessRunning(L"GTA5_Enhanced.exe")) {
-        targetProcess = "GTA5_Enhanced.exe";
-    }
-    else if (isProcessRunning(L"GTA5.exe")) {
-        targetProcess = "GTA5.exe";
-    }
-    else {
-        fprintf(stderr, "Could not find GTA process.\n");
-        exit(1);
-    }
-
-    hMapFile = OpenFileMappingW(FILE_MAP_READ, FALSE, L"RTSSSharedMemoryV2");
-    if (!hMapFile) {
-        fprintf(stderr, "Could not open RTSS Shared Memory.\n");
-        exit(1);
-    }
-
-    pMapAddr = reinterpret_cast<RTSS_SHARED_MEMORY*>(MapViewOfFile(hMapFile, FILE_MAP_READ, 0, 0, 0));
-    if (!pMapAddr) {
-        CloseHandle(hMapFile);
-        fprintf(stderr, "Failed to map view of shared memory.\n");
-        exit(1);
-    }
-
-    if (!findProcess(targetProcess)) {
-        std::cerr << "Failed to find target process in RTSS.\n";
-        Sleep(2000);
-        exit(1);
-    }
 }

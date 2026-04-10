@@ -141,6 +141,7 @@
   <ItemGroup>
     <ClCompile Include="InputHandler.cpp" />
     <ClCompile Include="Keybind.cpp" />
+    <ClCompile Include="KeyboardHookHandler.cpp" />
     <ClCompile Include="keymap.cpp">
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Speed</FavorSizeOrSpeed>
       <OmitFramePointers Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</OmitFramePointers>
@@ -166,6 +167,7 @@
     <ClInclude Include="..\..\..\..\..\Program Files (x86)\RivaTuner Statistics Server\SDK\Include\RTSSSharedMemory.h" />
     <ClInclude Include="InputHandler.h" />
     <ClInclude Include="Keybind.h" />
+    <ClInclude Include="KeyboardHookHandler.h" />
     <ClInclude Include="keymap.h" />
     <ClInclude Include="RTSSReader.h" />
   </ItemGroup>
