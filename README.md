@@ -1,3 +1,3 @@
-Make sure to set PGO to instrument and then to optimize for optimal macro performance and to get it to actually compile.
+Uses WebView2 for GUI cuz I'm a chud
 
-Don't ask for support. I can't be bothered. Figure it out yourself or ask Disturbed or something.
+Requires RivaTuner Statistics Server installed and enabled for GTAV/GTA5_Enhanced.exe to work.
