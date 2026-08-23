@@ -1,11 +1,12 @@
 #pragma once
 
 #include <windows.h>
+#include <array>
+#include <mutex>
 #include <string>
 
-#define WM_USER_REHOOK_KEYBOARD (WM_USER + 1)
-#define WM_USER_REHOOK_MOUSE (WM_USER + 2)
-#define CHAT_KEYBIND "t"
+constexpr UINT WM_APP_REHOOK_KEYBOARD = WM_APP + 1;
+constexpr UINT WM_APP_REHOOK_MOUSE = WM_APP + 2;
 
 class HookHandler {
 public:
@@ -20,9 +21,17 @@ public:
 	void removeMouseHook();
 	void rehook();
 
+	void setTargetProcess(DWORD pid, std::string name);
+	DWORD targetProcessId() const;
+	std::string targetProcessName() const;
+	bool isEnhancedTarget() const;
+	bool isPhysicalKeyDown(WORD keyCode) const;
+	void setMovementKeysBlocked(bool blocked);
+
 	static std::string getActiveProcessName();
 
 	bool inChat = false;
+
 private:
 	HookHandler();
 	~HookHandler() = default;
@@ -30,12 +39,18 @@ private:
 	void operator=(const HookHandler&) = delete;
 	static LRESULT CALLBACK onKeyPress(int nCode, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK onMouseEvent(int nCode, WPARAM wParam, LPARAM lParam);
-	bool isMainThread();
+	bool isMainThread() const;
+	bool isTargetForeground() const;
+	bool shouldBlockMovementKey(WORD keyCode) const;
+	void setPhysicalKeyState(WORD keyCode, bool down);
 
-	HHOOK keyboardHook;
-	HHOOK mouseHook;
-
-	WORD g_mainThreadId = 0;
-
-	static bool isChatRelatedKey(DWORD vkCode);
+	HHOOK keyboardHook = nullptr;
+	HHOOK mouseHook = nullptr;
+	DWORD mainThreadId = 0;
+	mutable std::mutex targetMutex;
+	DWORD targetPid = 0;
+	std::string targetName;
+	mutable std::mutex physicalStateMutex;
+	std::array<bool, 256> physicalKeyStates{};
+	bool movementKeysBlocked = false;
 };

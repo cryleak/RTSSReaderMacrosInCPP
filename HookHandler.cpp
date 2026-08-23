@@ -1,198 +1,181 @@
 #include "HookHandler.h"
-#include "RTSSReader.h"
-#include <Psapi.h>
-#include "Keybind.h"
-#include <optional>
+
+#include "Gui.h"
 #include "InputHandler.h"
+#include "Keybind.h"
 
-HookHandler::HookHandler() {
-	g_mainThreadId = GetCurrentThreadId();
-}
+#include <Psapi.h>
+#include <utility>
 
-bool HookHandler::isMainThread() {
-	return GetCurrentThreadId() == g_mainThreadId;
+HookHandler::HookHandler() : mainThreadId(GetCurrentThreadId()) {}
+
+bool HookHandler::isMainThread() const {
+	return GetCurrentThreadId() == mainThreadId;
 }
 
 bool HookHandler::addKeyboardHook() {
 	if (isMainThread()) {
-		keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, onKeyPress, GetModuleHandle(NULL), 0);
-		return keyboardHook != NULL;
-	} else {
-		PostThreadMessage(g_mainThreadId, WM_USER_REHOOK_KEYBOARD, 0, 0);
-		return true;
+		if (keyboardHook) return true;
+		keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, onKeyPress, GetModuleHandleW(nullptr), 0);
+		return keyboardHook != nullptr;
 	}
+	PostThreadMessageW(mainThreadId, WM_APP_REHOOK_KEYBOARD, 0, 0);
+	return true;
 }
 
 void HookHandler::removeKeyboardHook() {
 	if (keyboardHook) {
 		UnhookWindowsHookEx(keyboardHook);
-		keyboardHook = NULL;
+		keyboardHook = nullptr;
 	}
 }
 
 bool HookHandler::addMouseHook() {
 	if (isMainThread()) {
-		mouseHook = SetWindowsHookEx(WH_MOUSE_LL, onMouseEvent, GetModuleHandle(NULL), 0);
-		return mouseHook != NULL;
-	} else {
-		PostThreadMessage(g_mainThreadId, WM_USER_REHOOK_MOUSE, 0, 0);
-		return true;
+		if (mouseHook) return true;
+		mouseHook = SetWindowsHookExW(WH_MOUSE_LL, onMouseEvent, GetModuleHandleW(nullptr), 0);
+		return mouseHook != nullptr;
 	}
+	PostThreadMessageW(mainThreadId, WM_APP_REHOOK_MOUSE, 0, 0);
+	return true;
 }
 
 void HookHandler::removeMouseHook() {
 	if (mouseHook) {
 		UnhookWindowsHookEx(mouseHook);
-		mouseHook = NULL;
+		mouseHook = nullptr;
 	}
+}
+
+void HookHandler::setTargetProcess(DWORD pid, std::string name) {
+	std::lock_guard lock(targetMutex);
+	targetPid = pid;
+	targetName = std::move(name);
+}
+
+DWORD HookHandler::targetProcessId() const {
+	std::lock_guard lock(targetMutex);
+	return targetPid;
+}
+
+std::string HookHandler::targetProcessName() const {
+	std::lock_guard lock(targetMutex);
+	return targetName;
+}
+
+bool HookHandler::isEnhancedTarget() const {
+	std::lock_guard lock(targetMutex);
+	return _stricmp(targetName.c_str(), "GTA5_Enhanced.exe") == 0;
+}
+
+bool HookHandler::isPhysicalKeyDown(WORD keyCode) const {
+	std::lock_guard lock(physicalStateMutex);
+	if (keyCode == VK_SHIFT) return physicalKeyStates[VK_LSHIFT] || physicalKeyStates[VK_RSHIFT];
+	if (keyCode == VK_CONTROL) return physicalKeyStates[VK_LCONTROL] || physicalKeyStates[VK_RCONTROL];
+	if (keyCode == VK_MENU) return physicalKeyStates[VK_LMENU] || physicalKeyStates[VK_RMENU];
+	return keyCode < physicalKeyStates.size() && physicalKeyStates[keyCode];
+}
+
+void HookHandler::setMovementKeysBlocked(bool blocked) {
+	std::lock_guard lock(physicalStateMutex);
+	movementKeysBlocked = blocked;
+}
+
+bool HookHandler::shouldBlockMovementKey(WORD keyCode) const {
+	std::lock_guard lock(physicalStateMutex);
+	return movementKeysBlocked && (keyCode == 'A' || keyCode == 'D');
+}
+
+void HookHandler::setPhysicalKeyState(WORD keyCode, bool down) {
+	if (keyCode >= physicalKeyStates.size()) return;
+	std::lock_guard lock(physicalStateMutex);
+	physicalKeyStates[keyCode] = down;
+}
+
+bool HookHandler::isTargetForeground() const {
+	HWND foreground = GetForegroundWindow();
+	if (!foreground) return false;
+	DWORD foregroundPid = 0;
+	GetWindowThreadProcessId(foreground, &foregroundPid);
+	return foregroundPid != 0 && foregroundPid == targetProcessId();
 }
 
 std::string HookHandler::getActiveProcessName() {
 	HWND foregroundWindow = GetForegroundWindow();
-	if (foregroundWindow == NULL) {
-		return "No active window";
-	}
-
-	DWORD processId;
+	if (!foregroundWindow) return "No active window";
+	DWORD processId = 0;
 	GetWindowThreadProcessId(foregroundWindow, &processId);
-
-	HANDLE processHandle = OpenProcess(
-		PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
-	if (processHandle == NULL) {
-		return "Failed to open process";
-	}
-
-	TCHAR processName[MAX_PATH];
-	if (GetModuleFileNameEx(processHandle, NULL, processName, MAX_PATH) == 0) {
+	HANDLE processHandle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, processId);
+	if (!processHandle) return "Failed to open process";
+	char processName[MAX_PATH]{};
+	DWORD length = static_cast<DWORD>(std::size(processName));
+	if (QueryFullProcessImageNameA(processHandle, 0, processName, &length) == 0) {
 		CloseHandle(processHandle);
 		return "Failed to get process name";
 	}
-
 	CloseHandle(processHandle);
-
-	// To get just the executable name from the full path
-	std::wstring fullPath(processName, processName + lstrlen(processName));
-	size_t lastBackslash = fullPath.find_last_of(L"\\");
-	if (lastBackslash != std::wstring::npos) {
-		return std::string(fullPath.begin() + lastBackslash + 1, fullPath.end());
-	}
-
-	return std::string(fullPath.begin(), fullPath.end());
-}
-
-bool HookHandler::isChatRelatedKey(DWORD vkCode) {
-	return vkCode == InputHandler::getInstance().findKey(CHAT_KEYBIND).value() ||
-		vkCode == VK_RETURN || vkCode == VK_ESCAPE;
+	std::string fullPath(processName, length);
+	size_t slash = fullPath.find_last_of("\\/");
+	return slash == std::string::npos ? fullPath : fullPath.substr(slash + 1);
 }
 
 LRESULT CALLBACK HookHandler::onKeyPress(int nCode, WPARAM wParam, LPARAM lParam) {
 	if (nCode == HC_ACTION) {
-		KBDLLHOOKSTRUCT* pKeyBoard = (KBDLLHOOKSTRUCT*)lParam;
-
-		if (pKeyBoard->flags & LLKHF_INJECTED ||
-			getActiveProcessName() != RTSSReader::getInstance().targetProcess) {
-			return CallNextHookEx(getInstance().keyboardHook, nCode, wParam, lParam);
-		}
-		switch (wParam) {
-
-		case WM_KEYDOWN:
-		case WM_SYSKEYDOWN: {
-			// lParam is a pointer to a KBDLLHOOKSTRUCT
-			DWORD vkCode = pKeyBoard->vkCode;
-
-			for (Keybind& keybind : Keybind::keybinds) {
-				bool modifiersPressed = keybind.modifiers.size() != 0 ? std::all_of(keybind.modifiers.begin(), keybind.modifiers.end(), [](std::string modifier) {
-					std::optional<WORD> key = InputHandler::getInstance().findKey(modifier);
-					return InputHandler::getInstance().getPhysicalKeyState(key.value());
-					}) : true;
-				if (vkCode == keybind.keyCode && !keybind.isPressed && modifiersPressed) {
-					keybind.isPressed = true;
-					if (!getInstance().inChat || isChatRelatedKey(vkCode)) {
-						keybind.function();
+		auto* keyboard = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+		if (!(keyboard->flags & LLKHF_INJECTED)) {
+			bool down = wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN;
+			bool up = wParam == WM_KEYUP || wParam == WM_SYSKEYUP;
+			if (down || up) {
+				getInstance().setPhysicalKeyState(static_cast<WORD>(keyboard->vkCode), down);
+				if (NativeGui::captureKeyboardEvent(keyboard->vkCode, down)) return 1;
+				if (getInstance().isTargetForeground()) {
+					if (getInstance().shouldBlockMovementKey(static_cast<WORD>(keyboard->vkCode))) return 1;
+					const bool legacyGame = !getInstance().isEnhancedTarget();
+					if (down && legacyGame && getInstance().inChat && (keyboard->vkCode == VK_RETURN || keyboard->vkCode == VK_ESCAPE)) {
+						getInstance().inChat = false;
+						InputHandler::getInstance().queueInput(static_cast<WORD>(keyboard->vkCode), std::nullopt, false);
+						return 1;
 					}
-					return 1;
+					if (down && Keybind::dispatchKeyDown(static_cast<WORD>(keyboard->vkCode), legacyGame && getInstance().inChat, legacyGame)) return 1;
+					if (up && Keybind::dispatchKeyUp(static_cast<WORD>(keyboard->vkCode))) return 1;
 				}
 			}
-			break;
-		}
-
-		case WM_KEYUP:
-		case WM_SYSKEYUP: {
-			DWORD vkCode = pKeyBoard->vkCode;
-			for (Keybind& keybind : Keybind::keybinds) {
-				if (vkCode == keybind.keyCode) {
-					keybind.isPressed = false;
-					return 1;
-				}
-			}
-			break;
-		}
 		}
 	}
 	return CallNextHookEx(getInstance().keyboardHook, nCode, wParam, lParam);
 }
 
 LRESULT CALLBACK HookHandler::onMouseEvent(int nCode, WPARAM wParam, LPARAM lParam) {
-
 	if (nCode == HC_ACTION) {
-		MSLLHOOKSTRUCT* pMouse = (MSLLHOOKSTRUCT*)lParam;
-
-		if ((pMouse->flags & LLMHF_INJECTED) ||
-			getActiveProcessName() != RTSSReader::getInstance().targetProcess) {
-			return CallNextHookEx(getInstance().mouseHook, nCode, wParam, lParam);
-		}
-
-		DWORD vkCode = 0;
-
-		if (wParam == WM_LBUTTONDOWN || wParam == WM_LBUTTONUP) vkCode = VK_LBUTTON;
-		else if (wParam == WM_RBUTTONDOWN || wParam == WM_RBUTTONUP) vkCode = VK_RBUTTON;
-		else if (wParam == WM_MBUTTONDOWN || wParam == WM_MBUTTONUP) vkCode = VK_MBUTTON;
-		else if (wParam == WM_XBUTTONDOWN || wParam == WM_XBUTTONUP) {
-			WORD xButton = HIWORD(pMouse->mouseData);
-			if (xButton == XBUTTON1) vkCode = VK_XBUTTON1;
-			else if (xButton == XBUTTON2) vkCode = VK_XBUTTON2;
-		}
-
-		if (vkCode == 0) return CallNextHookEx(NULL, nCode, wParam, lParam);
-
-		switch (wParam) {
-
-		case WM_LBUTTONDOWN:
-		case WM_RBUTTONDOWN:
-		case WM_MBUTTONDOWN:
-		case WM_XBUTTONDOWN: {
-			for (Keybind& keybind : Keybind::keybinds) {
-				bool modifiersPressed = keybind.modifiers.size() != 0 ? std::all_of(keybind.modifiers.begin(), keybind.modifiers.end(), [](std::string modifier) {
-					std::optional<WORD> key = InputHandler::getInstance().findKey(modifier);
-					return InputHandler::getInstance().getPhysicalKeyState(key.value());
-					}) : true;
-
-				if (vkCode == keybind.keyCode && !keybind.isPressed && modifiersPressed) {
-					keybind.isPressed = true;
-					if (!getInstance().inChat) {
-						keybind.function();
-					}
-					return 1;
+		auto* mouse = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+		if (!(mouse->flags & LLMHF_INJECTED)) {
+			WORD keyCode = 0;
+			bool down = false;
+			bool up = false;
+			switch (wParam) {
+			case WM_LBUTTONDOWN: keyCode = VK_LBUTTON; down = true; break;
+			case WM_RBUTTONDOWN: keyCode = VK_RBUTTON; down = true; break;
+			case WM_MBUTTONDOWN: keyCode = VK_MBUTTON; down = true; break;
+			case WM_XBUTTONDOWN: keyCode = HIWORD(mouse->mouseData) == XBUTTON1 ? VK_XBUTTON1 : VK_XBUTTON2; down = true; break;
+			case WM_LBUTTONUP: keyCode = VK_LBUTTON; up = true; break;
+			case WM_RBUTTONUP: keyCode = VK_RBUTTON; up = true; break;
+			case WM_MBUTTONUP: keyCode = VK_MBUTTON; up = true; break;
+			case WM_XBUTTONUP: keyCode = HIWORD(mouse->mouseData) == XBUTTON1 ? VK_XBUTTON1 : VK_XBUTTON2; up = true; break;
+			case WM_MOUSEWHEEL: keyCode = HIWORD(mouse->mouseData) & 0x8000 ? 0x1000 : 0x1001; down = true; break;
+			case WM_MOUSEHWHEEL: keyCode = HIWORD(mouse->mouseData) & 0x8000 ? 0x1002 : 0x1003; down = true; break;
+			}
+			if (keyCode) {
+				if (down || up) getInstance().setPhysicalKeyState(keyCode, down);
+				if (NativeGui::captureMouseEvent(wParam, keyCode)) return 1;
+				if (getInstance().isTargetForeground()) {
+					const bool legacyGame = !getInstance().isEnhancedTarget();
+					if (down && Keybind::dispatchMouseDown(keyCode, legacyGame && getInstance().inChat, legacyGame)) return 1;
+					if (up && Keybind::dispatchMouseUp(keyCode)) return 1;
 				}
 			}
-			break;
-		}
-
-		case WM_LBUTTONUP:
-		case WM_RBUTTONUP:
-		case WM_MBUTTONUP:
-		case WM_XBUTTONUP: {
-			for (Keybind& keybind : Keybind::keybinds) {
-				if (vkCode == keybind.keyCode) {
-					keybind.isPressed = false;
-					return 1;
-				}
-			}
-			break;
-		}
 		}
 	}
-	return CallNextHookEx(NULL, nCode, wParam, lParam);
+	return CallNextHookEx(getInstance().mouseHook, nCode, wParam, lParam);
 }
 
 void HookHandler::rehook() {

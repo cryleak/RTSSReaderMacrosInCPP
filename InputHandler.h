@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <tchar.h>
+#include <chrono>
 #include <optional>
 #include <string>
 #include <vector>
@@ -9,8 +10,6 @@
 #include <mutex>
 #include <functional>
 #include <regex>
-
-#define USE_MOUSE_WHEEL 1
 
 class InputHandler {
 public:
@@ -23,6 +22,7 @@ public:
         int delay;
         std::optional<std::function<void()>> function;
         bool recursive;
+        std::chrono::steady_clock::time_point readyAt{};
     };
 
     struct Coordinates {
@@ -32,15 +32,19 @@ public:
     };
 
     void queueTask(Task task);
-    void queueTask(int delay, std::optional<std::function<void()>> function, bool recursive);
-    void queueInput(WORD vkCode, std::optional<bool> state, bool recursive);
-    void queueInputs(std::vector<std::string> inputs, std::function<void()> callback = nullptr);
-    void queueMouseMove(double x, double y, bool recursive);
+	void queueTask(int delay, std::optional<std::function<void()>> function, bool recursive);
+	void queueTaskAfter(std::chrono::milliseconds delay, std::function<void()> function);
+	void queueInput(WORD vkCode, std::optional<bool> state, bool recursive);
+	void queueInputs(std::vector<std::string> inputs, std::function<void()> callback = nullptr);
+	void queueMouseMove(double x, double y, bool recursive);
 
     void executeFirstQueuedTask();
+    bool hasQueuedTasks();
+    void clearQueuedTasks();
 
     bool getPhysicalKeyState(WORD vkCode);
     void sendKeyInput(WORD vkCode, bool pressDown);
+    void sendAutoHotkeyMouseMove(int x, int y);
 
     void lockCursorTo(double x, double y);
     void releaseCursor();

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "HookHandler.h"
 #include <iomanip>
+#include <utility>
 
 InputHandler::InputHandler()
 	: tasksPerformed(0),
@@ -45,23 +46,13 @@ LPCTSTR InputHandler::GetCursorType() {
 }
 
 bool InputHandler::getPhysicalKeyState(WORD vkCode) {
-	for (Keybind& keybind : Keybind::keybinds) {
-		if (vkCode == keybind.keyCode) return keybind.isPressed;
-	}
+	if (Keybind::isPressed(vkCode)) return true;
+	if (HookHandler::getInstance().isPhysicalKeyDown(vkCode)) return true;
 	return (GetAsyncKeyState(vkCode) & 0x8000) != 0;
 }
 
 std::optional<WORD> InputHandler::findKey(const std::string& keyToFind) {
-	std::string lowerCaseKey = keyToFind;
-	std::transform(lowerCaseKey.begin(), lowerCaseKey.end(), lowerCaseKey.begin(), ::tolower);
-
-	for (size_t i = 0; i < g_key_to_vk_size; ++i) {
-		if (g_key_to_vk[i].keyName == lowerCaseKey) return g_key_to_vk[i].vkCode;
-	}
-
-	SHORT vk = VkKeyScanExA(lowerCaseKey[0], usLayout);
-	if (vk == -1) return std::nullopt;
-	return (WORD)LOBYTE(vk);
+	return keyNameToVk(keyToFind);
 }
 
 void InputHandler::sendKeyInput(WORD vkCode, bool pressDown) {
@@ -80,10 +71,17 @@ void InputHandler::sendKeyInput(WORD vkCode, bool pressDown) {
 			input.mi.mouseData = XBUTTON2; break;
 		}
 	}
-	else if (vkCode == 0x1001 || vkCode == 0x1000) {
+	else if (vkCode >= 0x1000 && vkCode <= 0x1001) {
+		if (!pressDown) return;
 		input.type = INPUT_MOUSE;
 		input.mi.dwFlags = MOUSEEVENTF_WHEEL;
 		input.mi.mouseData = (vkCode == 0x1001) ? WHEEL_DELTA : -WHEEL_DELTA;
+	}
+	else if (vkCode == 0x1002 || vkCode == 0x1003) {
+		if (!pressDown) return;
+		input.type = INPUT_MOUSE;
+		input.mi.dwFlags = MOUSEEVENTF_HWHEEL;
+		input.mi.mouseData = (vkCode == 0x1003) ? WHEEL_DELTA : -WHEEL_DELTA;
 	}
 	else {
 		input.type = INPUT_KEYBOARD;
@@ -91,13 +89,29 @@ void InputHandler::sendKeyInput(WORD vkCode, bool pressDown) {
 		input.ki.wScan = MapVirtualKey(vkCode, MAPVK_VK_TO_VSC);
 		input.ki.dwFlags = KEYEVENTF_SCANCODE | (pressDown ? 0 : KEYEVENTF_KEYUP);
 
-		// Extended key logic
 		if (vkCode == VK_UP || vkCode == VK_DOWN || vkCode == VK_LEFT || vkCode == VK_RIGHT ||
 			vkCode == VK_LCONTROL || vkCode == VK_RCONTROL || vkCode == VK_INSERT || vkCode == VK_DELETE) {
 			input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
 		}
 	}
 	SendInput(1, &input, sizeof(INPUT));
+}
+
+void InputHandler::sendAutoHotkeyMouseMove(int x, int y) {
+	// ahk mousemove logic
+	int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+	int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+	if (screenWidth < 1) screenWidth = 1;
+	if (screenHeight < 1) screenHeight = 1;
+
+	auto toAbsolute = [](int coordinate, int extent) -> DWORD {
+		const long long absolute = (65536LL * coordinate) / extent + (coordinate < 0 ? -1 : 1);
+		return static_cast<DWORD>(static_cast<LONG>(absolute));
+	};
+
+	constexpr DWORD kAhkIgnoreLevelZero = 0xFFC3D44D;
+	mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
+		toAbsolute(x, screenWidth), toAbsolute(y, screenHeight), 0, kAhkIgnoreLevelZero);
 }
 
 void InputHandler::queueTask(Task task) {
@@ -108,6 +122,10 @@ void InputHandler::queueTask(Task task) {
 void InputHandler::queueTask(int delay, std::optional<std::function<void()>> function, bool recursive) {
 	std::lock_guard<std::mutex> lock(queuedTasksMutex);
 	queuedTasks.push({ delay, function, recursive });
+}
+
+void InputHandler::queueTaskAfter(std::chrono::milliseconds delay, std::function<void()> function) {
+	queueTask({ 0, std::move(function), true, std::chrono::steady_clock::now() + delay });
 }
 
 void InputHandler::queueInput(WORD vkCode, std::optional<bool> state, bool recursive) {
@@ -152,6 +170,8 @@ void InputHandler::executeFirstQueuedTask() {
 		{
 			std::lock_guard<std::mutex> lock(queuedTasksMutex);
 			if (queuedTasks.empty()) break;
+			if (queuedTasks.front().readyAt != std::chrono::steady_clock::time_point{} &&
+				std::chrono::steady_clock::now() < queuedTasks.front().readyAt) break;
 
 			if (--queuedTasks.front().delay < 0) {
 				taskToRun = queuedTasks.front();
@@ -169,6 +189,18 @@ void InputHandler::executeFirstQueuedTask() {
 			}
 		}
 	}
+}
+
+bool InputHandler::hasQueuedTasks() {
+	std::lock_guard<std::mutex> lock(queuedTasksMutex);
+	return !queuedTasks.empty();
+}
+
+void InputHandler::clearQueuedTasks() {
+	std::lock_guard<std::mutex> lock(queuedTasksMutex);
+	std::queue<Task> empty;
+	queuedTasks.swap(empty);
+	tasksPerformed = 0;
 }
 
 void InputHandler::lockCursorTo(double x, double y) {

@@ -1,294 +1,455 @@
-#include "keymap.h"
-#include <Psapi.h>
-#include <Windows.h>
-#include <algorithm>
-#include <chrono>
-#include <cstdio>
-#include <functional>
-#include <mmsystem.h>
-#include <mutex>
-#include <optional>
-#include <profileapi.h>
-#include <queue>
-#include <regex>
-#include <stdio.h>
-#include <string>
-#include <tchar.h>
-#include <thread>
-#include <tlhelp32.h>
-#include <vector>
-#include <winnt.h>
-#include <winuser.h>
-#include <iostream>
-#include "RTSSReader.h"
-#include "Keybind.h"
-#include "InputHandler.h"
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include "Gui.h"
 #include "HookHandler.h"
+#include "InputHandler.h"
+#include "Keybind.h"
+#include "RTSSReader.h"
+#include "Settings.h"
 #include "Utils.h"
+#include "keymap.h"
+
+#define NOMINMAX
+#include <Windows.h>
+#include <mmsystem.h>
+#include <algorithm>
+#include <mutex>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
 #pragma comment(lib, "winmm.lib")
+
 using namespace std::chrono_literals;
 
-// macros
-#define CONCAT(a, b) a##b
-#define EXPAND_AND_CONCAT(a, b) CONCAT(a, b)
-#define STRINGIFY(x) #x
-#define TOSTRING(x) STRINGIFY(x)
-#define KEY_DOWN(k) k " down"
-#define KEY_DOWN_R(k) k " downR"
-#define KEY_UP(k) k " up"
-#define KEY_UP_R(k) k " upR"
-
-#define USE_CURSOR_MACROS 1
-#define REPRESS_LEFT_CLICK 1
-
-// ingame keybinds
-#define INT_MENU_KEYBIND m
-#define INT_MENU_KEY TOSTRING(INT_MENU_KEYBIND)
-#define INT_MENU_KEY_R TOSTRING(EXPAND_AND_CONCAT(INT_MENU_KEYBIND, R))
-
-#define RPG_KEY "2"
-#define SNIPER_KEY "1"
-#define STICKY_BOMB_KEY "4"
-#define WEAPON_KEY_1 "3"
-#define WEAPON_KEY_2 "5"
-#define WEAPON_KEY_3 "6"
-#define WEAPON_KEY_4 "7"
-#define WEAPON_KEY_5 "8"
-
-// macro keybinds
-#define BST_KEY 220
-#define THERMAL_KEY 221
-#define SNACKS_KEY 186
-#define AMMO_KEY "F2"
-#define RPG_SPAM_KEY "f24" // i don't use this
-#define SNIPER_SPAM_KEY "f24"
-#define DOUBLE_SWITCH_KEY "q"
-
-bool prepareForIntMenuAndCacheLeftClickState() {
-	InputHandler::getInstance().queueInputs({ "lbutton upR", "rbutton upR" });
-	return InputHandler::getInstance().getPhysicalKeyState(InputHandler::getInstance().findKey("lbutton").value());
+namespace {
+std::string inputName(const KeyChord& key) {
+	return keyName(key.key);
 }
 
-// Must manually release int menu key later
-void ensureIntMenuOpen() { InputHandler::getInstance().queueInputs({ KEY_DOWN(INT_MENU_KEY), "sleep" }); }
+struct QuickTurnState {
+	double driftX = 0.0;
+	double driftY = 0.0;
+	double lastTurnTime = 0.0;
+};
 
-void ensureIntMenuClose() { InputHandler::getInstance().queueInputs({ KEY_DOWN(INT_MENU_KEY), "sleep", KEY_UP_R(INT_MENU_KEY) }); }
+std::mutex quickTurnMutex;
+QuickTurnState quickTurnState;
+std::atomic_int enhancedFrameGenerationMultiplier{1};
 
-void addKeybinds() { // Add keybinds here. Input syntax resembles AutoHotkey.
+double performanceMilliseconds() {
+	static const LARGE_INTEGER frequency = [] {
+		LARGE_INTEGER value{};
+		QueryPerformanceFrequency(&value);
+		return value;
+	}();
+	LARGE_INTEGER counter{};
+	QueryPerformanceCounter(&counter);
+	return static_cast<double>(counter.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
+}
 
-	new Keybind(BST_KEY, []() {
-		prepareForIntMenuAndCacheLeftClickState();
-		InputHandler::getInstance().queueInputs({ "enter downR", INT_MENU_KEY, "enter up", "enter downR",
-								   "up 3", "enter up", "enter downR", "down down",
-								   "enter upR", "down upR" });
-		});
+void quickTurn(const MacroSettings& settings) {
+	const int screenWidth = std::max(1, GetSystemMetrics(SM_CXSCREEN));
+	const double scalar = InputHandler::getInstance().getPhysicalKeyState(VK_RBUTTON) ? 321.435 / 180.0 : 263.0 / 180.0;
+	const double pixelsPerDegree = scalar / (3840.0 / static_cast<double>(screenWidth));
+	const double now = performanceMilliseconds();
+	std::lock_guard lock(quickTurnMutex);
+	if (quickTurnState.lastTurnTime != 0.0 && now - quickTurnState.lastTurnTime > 500.0) {
+		quickTurnState.driftX = 0.0;
+		quickTurnState.driftY = 0.0;
+	}
+	quickTurnState.lastTurnTime = now;
 
-	new Keybind(THERMAL_KEY, []() {
-		prepareForIntMenuAndCacheLeftClickState();
-		InputHandler::getInstance().queueInputs(
-			{ "enter downR", INT_MENU_KEY, "down 5", "enter up", "down downR",
-			 "enter down", "down up", "enter upR", "sleep 2",
-			 "space downR", INT_MENU_KEY_R, "space upR" });
-		},
-		{ "shift" });
+	const double totalPixelsX = -static_cast<double>(settings.quickTurnDegrees) * pixelsPerDegree + quickTurnState.driftX;
+	const int moveX = static_cast<int>(std::lround(totalPixelsX));
+	quickTurnState.driftX = totalPixelsX - moveX;
 
-	new Keybind(SNACKS_KEY, []() {
-		prepareForIntMenuAndCacheLeftClickState();
-		InputHandler::getInstance().queueInputs(
-			{ INT_MENU_KEY_R, "enter down", "down 4", "enter up", "down downR",
-			 "enter down", "down up", "down", "enter up" });
-		},
-		{ "shift" });
+	quickTurnState.driftY += 0.032 / (3840.0 / static_cast<double>(screenWidth));
+	int moveY = 0;
+	if (quickTurnState.driftY >= 1.0) {
+		moveY = -1;
+		quickTurnState.driftY -= 1.0;
+	}
+	InputHandler::getInstance().sendAutoHotkeyMouseMove(moveX, moveY);
+}
 
-	new Keybind(AMMO_KEY, []() {
+bool prepareForInteractionMenu() {
+	InputHandler::getInstance().queueInputs({"lbutton upR", "rbutton upR"});
+	return InputHandler::getInstance().getPhysicalKeyState(
+		InputHandler::getInstance().findKey("lbutton").value());
+}
 
-		/*
-		POINT cursorPos;
-		GetCursorPos(&cursorPos);
-		InputHandler::Coordinates relativeCoords = InputHandler::getPixelCoordinatesReverse(cursorPos.x, cursorPos.y);
-		std::cout << "Cursor normalized coordinates: (" << relativeCoords.x << ", " << relativeCoords.y << ")" << std::endl;
-		std::cout << "Cursor actual coordinates: (" << cursorPos.x << ", " << cursorPos.y << ")" << std::endl;
-		return;
-		*/
+struct AutomaticSwitchState {
+	bool enabled = false;
+	bool horizontal = false;
+};
 
+std::mutex tabSwitchStateMutex;
+KeyChord lastTabSwitchWeapon;
+std::chrono::steady_clock::time_point lastTabSwitchTime{};
 
-#if USE_CURSOR_MACROS
-		// Instead of queueing a mouse move, we can just force the cursor to be positioned where we want it to be. Prevents any movement by the user as well.
-		// InputHandler::getInstance().lockCursorTo(0.10625, 0.284259);
-		InputHandler::getInstance().lockCursorTo(0.0911458, 0.234259);
-#if REPRESS_LEFT_CLICK
-		bool leftClickPressed =
-#endif
-			prepareForIntMenuAndCacheLeftClickState();
+void resetTabSwitchState() {
+	std::lock_guard lock(tabSwitchStateMutex);
+	lastTabSwitchWeapon = {};
+	lastTabSwitchTime = {};
+	HookHandler::getInstance().setMovementKeysBlocked(false);
+}
 
-		InputHandler::getInstance().queueInputs({ "enter downR" });
-		ensureIntMenuOpen();
-		InputHandler::getInstance().queueInputs({ "sleep" });
-		// InputHandler::queueMouseMove(0.0911458, 0.234259, true);
+bool shouldAutomaticallyHandleSwitch(const MacroSettings& settings, const KeyChord& weaponKey) {
+	if (!settings.automaticLeftClickHandling || weaponKey.empty() || weaponKey == settings.stickyBombKey ||
+		settings.sprintKey.empty() ||
+		!InputHandler::getInstance().getPhysicalKeyState(settings.sprintKey.key)) return false;
 
-		// For some reason, left clicking in 2 frames is quite inconsistent. You can make the int menu keypress recursive, but then it will sometimes shoot your weapon.
-		InputHandler::getInstance().queueInputs({ "lbutton down", KEY_UP(INT_MENU_KEY), "lbutton up", "enter up", "enter 2", "enter downR", "up down", "enter upR", "up upR", });
-		ensureIntMenuClose();
-		InputHandler::getInstance().queueTask(0, []() { InputHandler::getInstance().releaseCursor(); }, true);
-#if REPRESS_LEFT_CLICK
-		if (leftClickPressed) {
-			InputHandler::getInstance().queueInputs({ "lbutton downR" });
+	std::lock_guard lock(tabSwitchStateMutex);
+	return !(lastTabSwitchWeapon == settings.stickyBombKey) ||
+		std::chrono::steady_clock::now() - lastTabSwitchTime > 390ms;
+}
+
+AutomaticSwitchState prepareAutomaticSwitch(const MacroSettings& settings, const KeyChord& weaponKey) {
+	AutomaticSwitchState state;
+	state.enabled = shouldAutomaticallyHandleSwitch(settings, weaponKey);
+	state.horizontal = state.enabled && settings.automaticHorizontalKeyHandling;
+	if (!state.enabled) return state;
+
+	if (state.horizontal) {
+		HookHandler::getInstance().setMovementKeysBlocked(true);
+		InputHandler::getInstance().queueInputs({"a upR", "d upR"});
+	}
+	InputHandler::getInstance().queueInputs({"lbutton upR"});
+	return state;
+}
+
+void queueAutomaticSwitchRestore(const AutomaticSwitchState& state) {
+	if (!state.enabled) return;
+	InputHandler::getInstance().queueTaskAfter(100ms, [horizontal = state.horizontal] {
+		auto& input = InputHandler::getInstance();
+		if (input.getPhysicalKeyState(VK_LBUTTON)) input.sendKeyInput(VK_LBUTTON, true);
+		if (horizontal) {
+			if (input.getPhysicalKeyState('A')) input.sendKeyInput('A', true);
+			if (input.getPhysicalKeyState('D')) input.sendKeyInput('D', true);
+			HookHandler::getInstance().setMovementKeysBlocked(false);
 		}
-#endif
-#else
-		InputHandler::getInstance().queueInputs({ INT_MENU_KEY_R, "enter down", "down 4", "enter up", "enter 2", "enter downR", "up down", "enter upR", "up upR" });
-		ensureIntMenuClose();
-#endif
-		});
-
-
-	new Keybind(RPG_KEY, []() { InputHandler::getInstance().queueInputs({ KEY_DOWN(RPG_KEY), "tabR", KEY_UP(RPG_KEY) }); });
-	new Keybind(STICKY_BOMB_KEY, []() { InputHandler::getInstance().queueInputs({ KEY_DOWN(STICKY_BOMB_KEY), "tabR", KEY_UP(STICKY_BOMB_KEY) }); });
-	new Keybind(SNIPER_KEY, []() { InputHandler::getInstance().queueInputs({ KEY_DOWN(SNIPER_KEY), "tabR", KEY_UP(SNIPER_KEY) }); });
-	new Keybind(WEAPON_KEY_1, []() { InputHandler::getInstance().queueInputs({ KEY_DOWN(WEAPON_KEY_1), "tabR", KEY_UP(WEAPON_KEY_1) }); });
-	new Keybind(WEAPON_KEY_2, []() { InputHandler::getInstance().queueInputs({ KEY_DOWN(WEAPON_KEY_2), "tabR", KEY_UP(WEAPON_KEY_2) }); });
-	new Keybind(WEAPON_KEY_3, []() { InputHandler::getInstance().queueInputs({ KEY_DOWN(WEAPON_KEY_3), "tabR", KEY_UP(WEAPON_KEY_3) }); });
-	new Keybind(WEAPON_KEY_4, []() { InputHandler::getInstance().queueInputs({ KEY_DOWN(WEAPON_KEY_4), "tabR", KEY_UP(WEAPON_KEY_4) }); });
-	new Keybind(WEAPON_KEY_5, []() { InputHandler::getInstance().queueInputs({ KEY_DOWN(WEAPON_KEY_5), "tabR", KEY_UP(WEAPON_KEY_5) }); });
-
-	new Keybind(RPG_SPAM_KEY, []() { InputHandler::getInstance().queueInputs({ KEY_DOWN(STICKY_BOMB_KEY), "sleep 2", KEY_DOWN(RPG_KEY), "tabR", KEY_UP_R(RPG_KEY), KEY_UP_R(STICKY_BOMB_KEY) });});
-	new Keybind(SNIPER_SPAM_KEY, []() { InputHandler::getInstance().queueInputs({ KEY_DOWN(STICKY_BOMB_KEY), KEY_DOWN(SNIPER_KEY), "tabR", KEY_UP_R(SNIPER_KEY), KEY_UP_R(STICKY_BOMB_KEY) }); });
-	new Keybind(DOUBLE_SWITCH_KEY, []() { InputHandler::getInstance().queueInputs({ RPG_KEY, KEY_DOWN(RPG_KEY), "tabR", KEY_UP_R(RPG_KEY) }); });
-
-	if (RTSSReader::getInstance().targetProcess != "GTA5_Enhanced.exe") {
-		new Keybind(CHAT_KEYBIND, []() {
-			HookHandler::getInstance().inChat = true;
-			InputHandler::getInstance().queueInputs({ CHAT_KEYBIND });
-			});
-
-		new Keybind("esc", []() {
-			HookHandler::getInstance().inChat = false;
-			InputHandler::getInstance().queueInputs({ "esc" });
-			});
-
-		new Keybind("enter", []() {
-			HookHandler::getInstance().inChat = false;
-			InputHandler::getInstance().queueInputs({ "enter" });
-			});
-	}
-
-	/*
-	Why is this so fucking inconsistent?
-	new Keybind("F6", []() {
-	  auto work_loop = [](auto &self) -> void {
-		InputHandler::queueInputs(
-			{"enter downR", "t", "hR", "eR", "lR", "lR", "o", "enter up"},
-			[&self]() {
-			  std::optional<WORD> keyCode = InputHandler::findKey("F6");
-
-			  if (InputHandler::getInstance().getPhysicalKeyState(keyCode.value())) {
-
-				InputHandler::getInstance().queueTask(0, [&self]() { self(self); }, true);
-			  }
-			});
-	  };
-
-	  work_loop(work_loop);
 	});
-	*/
 }
-BYTE keybindKeyState[] = { 0 };
 
-uint64_t previousPresentTime = 0;
-int frameGenMultiplier = 1; // For DLSS Frame Generation
-int framesDetected = 0;
-LARGE_INTEGER lastGenerated;
-constexpr long long sleepTime = 0.5; // in ms
+void rememberTabSwitch(const KeyChord& weaponKey) {
+	std::lock_guard lock(tabSwitchStateMutex);
+	lastTabSwitchWeapon = weaponKey;
+	lastTabSwitchTime = std::chrono::steady_clock::now();
+}
 
-int main() {
-	if (!SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS)) {
-		std::cerr << "Failed to set process priority." << std::endl;
+void ensureInteractionMenuOpen(const std::string& interactionMenuKey) {
+	InputHandler::getInstance().queueInputs({interactionMenuKey + " down", "sleep"});
+}
+
+void ensureInteractionMenuClose(const std::string& interactionMenuKey)	{
+	InputHandler::getInstance().queueInputs({interactionMenuKey + " down", "sleep", interactionMenuKey + " upR"});
+}
+
+void queueBst(const MacroSettings& settings) {
+	prepareForInteractionMenu();
+	InputHandler::getInstance().queueInputs({
+		"enter downR", inputName(settings.interactionMenuKey), "enter up", "enter downR",
+		"up 3", "enter up", "enter downR", "down down", "enter upR", "down upR"});
+}
+
+void queueThermal(const MacroSettings& settings) {
+	prepareForInteractionMenu();
+	const std::string interactionMenuKey = inputName(settings.interactionMenuKey);
+	InputHandler::getInstance().queueInputs({
+		"enter downR", interactionMenuKey, "down 5", "enter up", "down downR",
+		"enter down", "down up", "enter upR",});
+	if (!settings.thermalNightVision) {
+		InputHandler::getInstance().queueInputs({ "sleep", "down 4" });
+	}
+	InputHandler::getInstance().queueInputs({"sleep 2", "space downR",
+		interactionMenuKey + "R", "space upR"});
+}
+
+void queueSnacks(const MacroSettings& settings) {
+	prepareForInteractionMenu();
+	InputHandler::getInstance().queueInputs({
+		inputName(settings.interactionMenuKey) + "R", "enter down", "down 4", "enter up",
+		"down downR", "enter down", "down up", "down", "enter up"});
+}
+
+void queueAmmo(const MacroSettings& settings) {
+	const std::string interactionMenuKey = inputName(settings.interactionMenuKey);
+	if (settings.useCursorMacros) {
+		InputHandler::getInstance().lockCursorTo(0.0911458, 0.284259);
+		bool leftClickPressed = prepareForInteractionMenu();
+		InputHandler::getInstance().queueInputs({"enter downR"});
+		ensureInteractionMenuOpen(interactionMenuKey);
+		InputHandler::getInstance().queueInputs({
+			"sleep", "lbutton down", interactionMenuKey + " up", "lbutton up", "enter up",
+			"enter 2", "enter downR", "up down", "enter upR", "up upR"});
+		ensureInteractionMenuClose(interactionMenuKey);
+		InputHandler::getInstance().queueTask(0, [] { InputHandler::getInstance().releaseCursor(); }, true);
+		if (settings.repressLeftClick && leftClickPressed)
+			InputHandler::getInstance().queueInputs({"lbutton downR"});
+		return;
+	}
+
+	InputHandler::getInstance().queueInputs({
+		interactionMenuKey + "R", "enter down", "down 4", "enter up", "enter 2",
+		"enter downR", "up down", "enter upR", "up upR"});
+	ensureInteractionMenuClose(interactionMenuKey);
+}
+
+void queueWeaponSwitch(const MacroSettings& settings, const KeyChord& weaponKey) {
+	if (weaponKey.empty() || settings.weaponWheelKey.empty()) return;
+	const AutomaticSwitchState automatic = prepareAutomaticSwitch(settings, weaponKey);
+	InputHandler::getInstance().queueInputs({
+		inputName(weaponKey) + " down", "sleep", inputName(settings.weaponWheelKey) + "R", inputName(weaponKey) + " up"},
+		[automatic] { queueAutomaticSwitchRestore(automatic); });
+	rememberTabSwitch(weaponKey);
+}
+
+void queueExplicitWeaponSwitch(const MacroSettings& settings, const KeyChord& weaponKey, int pressAmount) {
+	if (settings.fistsKey.empty() || weaponKey.empty() || settings.weaponWheelKey.empty()) return;
+	auto& input = InputHandler::getInstance();
+	const bool leftButtonWasDown = settings.repressLeftClick && input.getPhysicalKeyState(VK_LBUTTON);
+	std::vector<std::string> inputs = {
+		"lbutton upR", inputName(settings.fistsKey) + " down"};
+	for (int i = 1; i < pressAmount; ++i) inputs.push_back(inputName(weaponKey));
+	inputs.push_back(inputName(weaponKey) + " down");
+	inputs.push_back(inputName(settings.weaponWheelKey) + "R");
+	inputs.push_back(inputName(settings.fistsKey) + " upR");
+	inputs.push_back(inputName(weaponKey) + " upR");
+	input.queueInputs(std::move(inputs), [leftButtonWasDown] {
+		if (leftButtonWasDown) InputHandler::getInstance().sendKeyInput(VK_LBUTTON, true);
+	});
+}
+
+void queueSafeHeavySwap(const MacroSettings& settings) {
+	if (settings.meleeKey.empty() || settings.rpgKey.empty() || settings.weaponWheelKey.empty()) return;
+	InputHandler::getInstance().queueInputs({
+		inputName(settings.meleeKey) + " down", inputName(settings.rpgKey) + " down",
+		inputName(settings.weaponWheelKey) + "R", inputName(settings.meleeKey) + " upR",
+		inputName(settings.rpgKey) + " upR"});
+}
+
+void queueRpgSpam(const MacroSettings& settings) {
+	InputHandler::getInstance().queueInputs({
+		inputName(settings.stickyBombKey) + " down", "sleep 2", inputName(settings.rpgKey) + " down",
+		inputName(settings.weaponWheelKey) + "R", inputName(settings.rpgKey) + " upR",
+		inputName(settings.stickyBombKey) + " upR"});
+}
+
+void queueSniperSpam(const MacroSettings& settings) {
+	InputHandler::getInstance().queueInputs({
+		inputName(settings.stickyBombKey) + " down", inputName(settings.sniperKey) + " down",
+		inputName(settings.weaponWheelKey) + "R", inputName(settings.sniperKey) + " upR",
+		inputName(settings.stickyBombKey) + " upR"});
+}
+
+void queueDoubleSwitch(const MacroSettings& settings) {
+	if (settings.rpgKey.empty() || settings.weaponWheelKey.empty()) return;
+	const AutomaticSwitchState automatic = prepareAutomaticSwitch(settings, settings.rpgKey);
+	InputHandler::getInstance().queueInputs({
+		inputName(settings.rpgKey), inputName(settings.rpgKey) + " down",
+		inputName(settings.weaponWheelKey) + "R", inputName(settings.rpgKey) + " upR"},
+		[automatic] { queueAutomaticSwitchRestore(automatic); });
+	rememberTabSwitch(settings.rpgKey);
+}
+
+bool validateSettings(const MacroSettings& settings, std::string& error) {
+	if (settings.frameGenerationMultiplier < 1 || settings.frameGenerationMultiplier > 4) {
+		error = "Enhanced frame generation multiplier must be between 1 and 4.";
+		return false;
+	}
+	const std::array<std::pair<const KeyChord*, const char*>, 23> triggers = {{
+		{&settings.bstHotkey, "BST"}, {&settings.thermalHotkey, "thermal"}, {&settings.snacksHotkey, "snacks"},
+		{&settings.ammoHotkey, "ammo"}, {&settings.quickTurnHotkey, "quick turn"}, {&settings.rpgTabSwitchHotkey, "RPG tab switch"},
+		{&settings.stickyBombTabSwitchHotkey, "sticky bomb tab switch"},
+		{&settings.sniperTabSwitchHotkey, "sniper tab switch"},
+		{&settings.pistolTabSwitchHotkey, "pistol tab switch"},
+		{&settings.shotgunTabSwitchHotkey, "shotgun tab switch"},
+		{&settings.rifleTabSwitchHotkey, "rifle tab switch"},
+		{&settings.smgTabSwitchHotkey, "SMG tab switch"},
+		{&settings.fistsTabSwitchHotkey, "fists tab switch"},
+		{&settings.meleeTabSwitchHotkey, "melee tab switch"},
+		{&settings.rpgSpamHotkey, "RPG spam"}, {&settings.sniperSpamHotkey, "sniper spam"}, {&settings.doubleSwitchHotkey, "double switch"},
+		{&settings.chatKey, "chat"}, {&settings.explicitRpgSwitchHotkey, "explicit RPG switch"},
+		{&settings.explicitHomingSwitchHotkey, "explicit homing switch"},
+		{&settings.explicitGrenadeSwitchHotkey, "explicit grenade switch"},
+		{&settings.safeHeavySwapHotkey, "safe heavy swap"},
+		{&settings.suspendHotkey, "suspend macros"},
+	}};
+	for (size_t i = 0; i < triggers.size(); ++i) {
+		if (triggers[i].first->empty()) continue;
+		for (size_t j = i + 1; j < triggers.size(); ++j) {
+			if (!triggers[j].first->empty() && *triggers[i].first == *triggers[j].first) {
+				error = std::string("Macro hotkey is used twice: ") + triggers[i].second + " and " + triggers[j].second;
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+void installKeybinds(const MacroSettings& settings) {
+	Keybind::clear();
+	Keybind::add(settings.bstHotkey, [settings] { queueBst(settings); }, false, "BST");
+	Keybind::add(settings.thermalHotkey, [settings] { queueThermal(settings); }, false, "Thermal");
+	Keybind::add(settings.snacksHotkey, [settings] { queueSnacks(settings); }, false, "Snacks");
+	Keybind::add(settings.ammoHotkey, [settings] { queueAmmo(settings); }, false, "Ammo");
+	Keybind::add(settings.quickTurnHotkey, [settings] { quickTurn(settings); }, false, "Quick turn");
+
+	Keybind::add(settings.rpgTabSwitchHotkey, [settings] { queueWeaponSwitch(settings, settings.rpgKey); }, false, "RPG tab switch");
+	Keybind::add(settings.stickyBombTabSwitchHotkey, [settings] { queueWeaponSwitch(settings, settings.stickyBombKey); }, false, "Sticky bomb tab switch");
+	Keybind::add(settings.sniperTabSwitchHotkey, [settings] { queueWeaponSwitch(settings, settings.sniperKey); }, false, "Sniper tab switch");
+	Keybind::add(settings.pistolTabSwitchHotkey, [settings] { queueWeaponSwitch(settings, settings.pistolKey); }, false, "Pistol tab switch");
+	Keybind::add(settings.shotgunTabSwitchHotkey, [settings] { queueWeaponSwitch(settings, settings.shotgunKey); }, false, "Shotgun tab switch");
+	Keybind::add(settings.rifleTabSwitchHotkey, [settings] { queueWeaponSwitch(settings, settings.rifleKey); }, false, "Rifle tab switch");
+	Keybind::add(settings.smgTabSwitchHotkey, [settings] { queueWeaponSwitch(settings, settings.smgKey); }, false, "SMG tab switch");
+	Keybind::add(settings.fistsTabSwitchHotkey, [settings] { queueWeaponSwitch(settings, settings.fistsKey); }, false, "Fists tab switch");
+	Keybind::add(settings.meleeTabSwitchHotkey, [settings] { queueWeaponSwitch(settings, settings.meleeKey); }, false, "Melee tab switch");
+
+	Keybind::add(settings.rpgSpamHotkey, [settings] { queueRpgSpam(settings); }, false, "RPG spam");
+	Keybind::add(settings.sniperSpamHotkey, [settings] { queueSniperSpam(settings); }, false, "Sniper spam");
+	Keybind::add(settings.doubleSwitchHotkey, [settings] { queueDoubleSwitch(settings); }, false, "Double switch");
+	Keybind::add(settings.explicitRpgSwitchHotkey, [settings] { queueExplicitWeaponSwitch(settings, settings.rpgKey, 1); }, false, "Explicit RPG switch");
+	Keybind::add(settings.explicitHomingSwitchHotkey, [settings] { queueExplicitWeaponSwitch(settings, settings.rpgKey, 2); }, false, "Explicit homing switch");
+	Keybind::add(settings.explicitGrenadeSwitchHotkey, [settings] { queueExplicitWeaponSwitch(settings, settings.rpgKey, 3); }, false, "Explicit grenade switch");
+	Keybind::add(settings.safeHeavySwapHotkey, [settings] { queueSafeHeavySwap(settings); }, false, "Safe heavy swap");
+	Keybind::add(settings.suspendHotkey, [] {}, true, "Suspend", true);
+	Keybind::add(settings.chatKey, [settings] {
+		HookHandler::getInstance().inChat = true;
+		InputHandler::getInstance().queueInputs({inputName(settings.chatKey)});
+	}, true, "Chat");
+}
+
+bool applySettings(const MacroSettings& settings, std::string& error) {
+	if (!validateSettings(settings, error)) return false;
+	if (!SettingsStore::save(settings, error)) return false;
+	enhancedFrameGenerationMultiplier.store(std::clamp(settings.frameGenerationMultiplier, 1, 4), std::memory_order_relaxed);
+	InputHandler::getInstance().clearQueuedTasks();
+	InputHandler::getInstance().releaseCursor();
+	HookHandler::getInstance().inChat = false;
+	resetTabSwitchState();
+	installKeybinds(settings);
+	return true;
+}
+} // namespace
+
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
+	if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) SetProcessDPIAware();
+	if (commandLine && wcsstr(commandLine, L"--self-test")) {
+		std::string error;
+		return runSettingsSelfTest(error) ? 0 : 1;
+	}
+
+	std::vector<std::string> warnings;
+	MacroSettings settings = SettingsStore::load(&warnings);
+	enhancedFrameGenerationMultiplier.store(std::clamp(settings.frameGenerationMultiplier, 1, 4), std::memory_order_relaxed);
+	installKeybinds(settings);
+
+	NativeGui& gui = NativeGui::getInstance();
+	if (!gui.create(instance, settings, applySettings)) {
+		MessageBoxW(nullptr, L"Could not create the RTSS Reader Macros window.", L"RTSS Reader Macros", MB_OK | MB_ICONERROR);
 		return 1;
 	}
 
+	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	if (!HookHandler::getInstance().addKeyboardHook() || !HookHandler::getInstance().addMouseHook()) {
-		std::cerr << "Failed to install the hook." << std::endl;
+		MessageBoxW(gui.window(), L"Could not install the global input hooks.", L"RTSS Reader Macros", MB_OK | MB_ICONERROR);
+		gui.exit();
 		return 1;
 	}
-	RTSSReader::getInstance(); // initalize
-	addKeybinds();
-	std::cout << "Keybinds initalized successfully." << std::endl;
-	if (!SetProcessPriorityByName(std::wstring(RTSSReader::getInstance().targetProcess.begin(), RTSSReader::getInstance().targetProcess.end()), HIGH_PRIORITY_CLASS)) {
-		std::cerr << "Failed to set process priority of " << RTSSReader::getInstance().targetProcess << "." << std::endl;
-		return 1;
-	}
-	std::cout << "GTA's process priority set successfully." << std::endl;
 
-	std::thread([]() {
+	std::atomic_bool running = true;
+	std::thread rtssThread([&] {
+		RTSSReader& reader = RTSSReader::getInstance();
+		RtssStatus status = reader.status();
+		uint64_t generation = status.generation;
+		auto nextRefresh = std::chrono::steady_clock::now();
+		while (running) {
+			auto now = std::chrono::steady_clock::now();
+			if (now >= nextRefresh) {
+				status = reader.refresh();
+				nextRefresh = std::chrono::steady_clock::now() + 250ms;
+				if (status.generation != generation) {
+					generation = status.generation;
+					HookHandler::getInstance().setTargetProcess(status.targetPid, status.targetProcess);
+					InputHandler::getInstance().clearQueuedTasks();
+					InputHandler::getInstance().releaseCursor();
+					resetTabSwitchState();
+				}
+				gui.postRtssStatus(status);
+			}
+			std::this_thread::sleep_for(10ms);
+		}
+		reader.close();
+	});
+
+	std::thread frameThread([&] {
 		SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 		timeBeginPeriod(1);
-		HANDLE hTimer = CreateWaitableTimerEx(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-		if (hTimer == NULL) {
-			std::cerr << "Failed to create high resolution timer." << std::endl;
-			exit(1);
-		}
-		static ULONGLONG lastHookTime = 0;
-		while (true) {
-			// qwPresentStartTime or qwPresentEndTime, haven't really tested which one is more consistent or if there's any difference at all.
-			uint64_t presentTime = RTSSReader::getInstance().getAppMember<uint64_t>(offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwPresentEndTime));
-			// std::cout << "Present time: " << presentTime << std::endl;
-			if (presentTime != previousPresentTime) {
-				previousPresentTime = presentTime;
-				if (RTSSReader::getInstance().targetProcess != "GTA5_Enhanced.exe" || ++framesDetected == frameGenMultiplier) {
+		HANDLE highResolutionTimer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+		uint64_t previousPresentTime = 0;
+		int framesDetected = 0;
+		while (running) {
+			uint64_t present = RTSSReader::getInstance().presentTime();
+			if (present && present != previousPresentTime) {
+				previousPresentTime = present;
+				const bool enhanced = HookHandler::getInstance().isEnhancedTarget();
+				if (!enhanced) framesDetected = 0;
+				const int multiplier = std::clamp(enhancedFrameGenerationMultiplier.load(std::memory_order_relaxed), 1, 4);
+				if (!enhanced || ++framesDetected >= multiplier) {
 					framesDetected = 0;
 					InputHandler::getInstance().executeFirstQueuedTask();
 				}
 			}
 
-			// If there are currently queued tasks I want to check as often as possible for present time updates. This is incredibly bad for the CPU but we should be doing it for very short time periods so it should be OK.
-			if (InputHandler::getInstance().queuedTasks.empty()) {
-				if (InputHandler::getInstance().tasksPerformed > 0) {
-					auto keybindStartTime = Keybind::keybindStartTime;
-					auto timeSinceKeybindStart = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count() - keybindStartTime;
-					std::cout << "Frames taken to perform the task: " << InputHandler::getInstance().tasksPerformed << " (" << timeSinceKeybindStart << "ms taken to perform)" << std::endl;
-					InputHandler::getInstance().tasksPerformed = 0;
-
-					lastHookTime = GetTickCount64();
-					HookHandler::getInstance().rehook();
-				}
-
-				if (!RTSSReader::getInstance().isTargetAppStillRunning()) {
-					HookHandler::getInstance().removeKeyboardHook();
-					HookHandler::getInstance().removeMouseHook();
-					std::cerr << "Target app is no longer running. Exiting..." << std::endl;
-					MessageBoxA(NULL, "Target app is no longer running. Restart the macros because I can't be asked to write handling for this.", "Error", MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND | MB_SYSTEMMODAL);
-					exit(0);
-				}
-
-				if (GetTickCount64() - lastHookTime >= 5000) { // Reinstall keyboard hook every 5 seconds or when tasks are finished. 
-					lastHookTime = GetTickCount64();
-					HookHandler::getInstance().rehook();
-				}
-
-				LARGE_INTEGER dueTime;
-				dueTime.QuadPart = -(sleepTime * 10000LL);
-
-				if (SetWaitableTimer(hTimer, &dueTime, 0, NULL, NULL, FALSE)) { // This somehow lets me sleep with a precision of 0.5ms
-					WaitForSingleObject(hTimer, INFINITE);
+			if (!InputHandler::getInstance().hasQueuedTasks()) {
+				if (highResolutionTimer) {
+					LARGE_INTEGER dueTime{};
+					dueTime.QuadPart = -5000;
+					if (SetWaitableTimer(highResolutionTimer, &dueTime, 0, nullptr, nullptr, FALSE)) {
+						WaitForSingleObject(highResolutionTimer, INFINITE);
+					} else {
+						Sleep(1);
+					}
+				} else {
+					Sleep(1);
 				}
 			}
 		}
-		}).detach();
+		if (highResolutionTimer) CloseHandle(highResolutionTimer);
+		timeEndPeriod(1);
+	});
 
-	std::cout << "Initialization complete." << std::endl;
-
-	MSG msg;
-	while (GetMessage(&msg, NULL, 0, 0)) {
-		if (msg.message == WM_USER_REHOOK_KEYBOARD) {
+	MSG message{};
+	while (true) {
+		int result = GetMessageW(&message, nullptr, 0, 0);
+		if (result <= 0) break;
+		if (message.message == WM_APP_REHOOK_KEYBOARD) {
 			HookHandler::getInstance().addKeyboardHook();
 			continue;
-		} else if (msg.message == WM_USER_REHOOK_MOUSE) {
+		}
+		if (message.message == WM_APP_REHOOK_MOUSE) {
 			HookHandler::getInstance().addMouseHook();
 			continue;
 		}
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
+		TranslateMessage(&message);
+		DispatchMessageW(&message);
 	}
+
+	running = false;
+	if (rtssThread.joinable()) rtssThread.join();
+	if (frameThread.joinable()) frameThread.join();
+	InputHandler::getInstance().releaseCursor();
+	HookHandler::getInstance().removeKeyboardHook();
+	HookHandler::getInstance().removeMouseHook();
 	return 0;
 }
