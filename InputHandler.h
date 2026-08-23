@@ -11,32 +11,39 @@
 #include <functional>
 #include <regex>
 
-class InputHandler {
+class InputHandler
+{
 public:
-    static InputHandler& getInstance() {
+    static InputHandler& getInstance()
+    {
         static InputHandler instance;
         return instance;
     }
 
-    struct Task {
+    struct Task
+    {
         int delay;
         std::optional<std::function<void()>> function;
         bool recursive;
         std::chrono::steady_clock::time_point readyAt{};
     };
 
-    struct Coordinates {
+    struct Coordinates
+    {
         double x;
         double y;
-        Coordinates(double x, double y) : x(x), y(y) {}
+
+        Coordinates(double x, double y) : x(x), y(y)
+        {
+        }
     };
 
     void queueTask(Task task);
-	void queueTask(int delay, std::optional<std::function<void()>> function, bool recursive);
-	void queueTaskAfter(std::chrono::milliseconds delay, std::function<void()> function);
-	void queueInput(WORD vkCode, std::optional<bool> state, bool recursive);
-	void queueInputs(std::vector<std::string> inputs, std::function<void()> callback = nullptr);
-	void queueMouseMove(double x, double y, bool recursive);
+    void queueTask(int delay, std::optional<std::function<void()>> function, bool recursive);
+    void queueTaskAfter(std::chrono::milliseconds delay, std::function<void()> function);
+    void queueInput(WORD vkCode, std::optional<bool> state, bool recursive);
+    void queueInputs(std::vector<std::string> inputs, std::function<void()> callback = nullptr);
+    void queueMouseMove(double x, double y, bool recursive);
 
     void executeFirstQueuedTask();
     bool hasQueuedTasks();

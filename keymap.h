@@ -4,9 +4,10 @@
 #include <optional>
 #include <Windows.h>
 
-struct key_to_vk_type {
-  std::string keyName;
-  int vkCode;
+struct key_to_vk_type
+{
+    std::string keyName;
+    int vkCode;
 };
 
 extern key_to_vk_type g_key_to_vk[];

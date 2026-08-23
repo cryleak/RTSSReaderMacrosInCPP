@@ -3,7 +3,8 @@
 #include <string>
 #include <TlHelp32.h>
 
-bool SetProcessPriorityByName(const std::wstring& processName, DWORD priorityClass) {
+bool SetProcessPriorityByName(const std::wstring& processName, DWORD priorityClass)
+{
     bool success = false;
     HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
@@ -12,19 +13,25 @@ bool SetProcessPriorityByName(const std::wstring& processName, DWORD priorityCla
     PROCESSENTRY32W pe;
     pe.dwSize = sizeof(PROCESSENTRY32W);
 
-    if (Process32FirstW(hSnapshot, &pe)) {
-        do {
-            if (processName == pe.szExeFile) {
+    if (Process32FirstW(hSnapshot, &pe))
+    {
+        do
+        {
+            if (processName == pe.szExeFile)
+            {
                 HANDLE hProcess = OpenProcess(PROCESS_SET_INFORMATION, FALSE, pe.th32ProcessID);
 
-                if (hProcess != NULL) {
-                    if (SetPriorityClass(hProcess, priorityClass)) {
+                if (hProcess != nullptr)
+                {
+                    if (SetPriorityClass(hProcess, priorityClass))
+                    {
                         success = true;
                     }
                     CloseHandle(hProcess);
                 }
             }
-        } while (Process32NextW(hSnapshot, &pe));
+        }
+        while (Process32NextW(hSnapshot, &pe));
     }
 
     CloseHandle(hSnapshot);
