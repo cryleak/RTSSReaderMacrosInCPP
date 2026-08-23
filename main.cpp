@@ -10,6 +10,7 @@
 #include "Keybind.h"
 #include "RTSSReader.h"
 #include "Settings.h"
+#include "Updater.h"
 #include "Utils.h"
 #include "keymap.h"
 
@@ -346,7 +347,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
 	if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) SetProcessDPIAware();
 	if (commandLine && wcsstr(commandLine, L"--self-test")) {
 		std::string error;
-		return runSettingsSelfTest(error) ? 0 : 1;
+		return runSettingsSelfTest(error) && Updater::selfTest(error) ? 0 : 1;
 	}
 
 	std::vector<std::string> warnings;
@@ -355,7 +356,19 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
 	installKeybinds(settings);
 
 	NativeGui& gui = NativeGui::getInstance();
-	if (!gui.create(instance, settings, applySettings)) {
+	std::thread updateCheckThread;
+	std::thread updateInstallThread;
+	std::atomic_bool updateInstallRunning = false;
+	auto startUpdateInstall = [&](const Updater::UpdateInfo& info) {
+		if (updateInstallRunning.exchange(true)) return;
+		if (updateInstallThread.joinable()) updateInstallThread.join();
+		updateInstallThread = std::thread([&gui, info, &updateInstallRunning] {
+			const Updater::InstallResult result = Updater::downloadAndInstall(info);
+			updateInstallRunning.store(false);
+			gui.postUpdateInstallResult(result);
+		});
+	};
+	if (!gui.create(instance, settings, applySettings, startUpdateInstall)) {
 		MessageBoxW(nullptr, L"Could not create the RTSS Reader Macros window.", L"RTSS Reader Macros", MB_OK | MB_ICONERROR);
 		return 1;
 	}
@@ -366,6 +379,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
 		gui.exit();
 		return 1;
 	}
+	updateCheckThread = std::thread([&gui] {
+		gui.postUpdateCheck(Updater::checkForUpdate());
+	});
 
 	std::atomic_bool running = true;
 	std::thread rtssThread([&] {
@@ -412,17 +428,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
 			}
 
 			if (!InputHandler::getInstance().hasQueuedTasks()) {
-				if (highResolutionTimer) {
 					LARGE_INTEGER dueTime{};
 					dueTime.QuadPart = -5000;
-					if (SetWaitableTimer(highResolutionTimer, &dueTime, 0, nullptr, nullptr, FALSE)) {
-						WaitForSingleObject(highResolutionTimer, INFINITE);
-					} else {
-						Sleep(1);
-					}
-				} else {
-					Sleep(1);
-				}
+					SetWaitableTimer(highResolutionTimer, &dueTime, 0, nullptr, nullptr, FALSE);
+					WaitForSingleObject(highResolutionTimer, INFINITE);
 			}
 		}
 		if (highResolutionTimer) CloseHandle(highResolutionTimer);
@@ -446,6 +455,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int) {
 	}
 
 	running = false;
+	if (updateCheckThread.joinable()) updateCheckThread.join();
+	if (updateInstallThread.joinable()) updateInstallThread.join();
 	if (rtssThread.joinable()) rtssThread.join();
 	if (frameThread.joinable()) frameThread.join();
 	InputHandler::getInstance().releaseCursor();

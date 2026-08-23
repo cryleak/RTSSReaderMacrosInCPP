@@ -2,6 +2,7 @@
 
 #include "RTSSReader.h"
 #include "Settings.h"
+#include "Updater.h"
 
 #include <d2d1.h>
 #include <dwrite.h>
@@ -17,18 +18,21 @@
 class NativeGui {
 public:
 	using ApplyCallback = std::function<bool(const MacroSettings&, std::string&)>;
+	using UpdateInstallCallback = std::function<void(const Updater::UpdateInfo&)>;
 	struct Rect { float left, top, right, bottom; };
 	enum class Tab { General, Weapons, Controls, Advanced };
 
 	static NativeGui& getInstance();
 
-	bool create(HINSTANCE instance, const MacroSettings& settings, ApplyCallback apply);
+	bool create(HINSTANCE instance, const MacroSettings& settings, ApplyCallback apply, UpdateInstallCallback updateInstall);
 	void show();
 	void hide();
 	void exit();
 	HWND window() const { return hwnd; }
 
 	void postRtssStatus(const RtssStatus& status);
+	void postUpdateCheck(const Updater::UpdateInfo& info);
+	void postUpdateInstallResult(const Updater::InstallResult& result);
 
 	static bool captureKeyboardEvent(DWORD keyCode, bool down);
 	static bool captureMouseEvent(WPARAM message, WORD keyCode);
@@ -39,8 +43,8 @@ private:
 	NativeGui(const NativeGui&) = delete;
 	void operator=(const NativeGui&) = delete;
 
-	enum class HitType { Tab, Setting, Save, Discard, Import, MatchGtaKeys, Hide, CaptureCancel, CaptureUnbind, NumberApply, Profile, SourceLegacy, SourceEnhanced };
-	enum class ModalKind { None, Source, Profile, Capture, Number };
+	enum class HitType { Tab, Setting, Save, Discard, Import, MatchGtaKeys, Hide, CaptureCancel, CaptureUnbind, NumberApply, Profile, SourceLegacy, SourceEnhanced, UpdateCancel, UpdateInstall };
+	enum class ModalKind { None, Source, Profile, Capture, Number, Update };
 	struct Hit { Rect rect{}; HitType type{}; SettingId setting{}; size_t index = 0; Tab tab{}; };
 	struct SettingRow { SettingId id; Tab tab; const wchar_t* label; const wchar_t* description; };
 
@@ -49,6 +53,8 @@ private:
 	static constexpr UINT WM_APP_TRAY = WM_APP + 12;
 	static constexpr UINT WM_APP_NUMBER_APPLY = WM_APP + 13;
 	static constexpr UINT WM_APP_NUMBER_CANCEL = WM_APP + 14;
+	static constexpr UINT WM_APP_UPDATE_CHECK = WM_APP + 15;
+	static constexpr UINT WM_APP_UPDATE_RESULT = WM_APP + 16;
 	static constexpr UINT_PTR kMessageTimer = 1;
 	static constexpr UINT_PTR kAnimationTimer = 2;
 
@@ -68,6 +74,7 @@ private:
 	void drawProfileModal(float width, float height);
 	void drawCaptureModal(float width, float height);
 	void drawNumberModal(float width, float height);
+	void drawUpdateModal(float width, float height);
 	void drawText(const std::wstring& text, Rect rect, IDWriteTextFormat* format, D2D1::ColorF color);
 	void fill(Rect rect, D2D1::ColorF color, float radius = 0.0f);
 	void fillGradient(Rect rect, D2D1::ColorF first, D2D1::ColorF second, float radius = 0.0f);
@@ -101,6 +108,7 @@ private:
 	bool trayAdded = false;
 	bool allowDestroy = false;
 	ApplyCallback applyCallback;
+	UpdateInstallCallback updateInstallCallback;
 
 	MacroSettings savedSettings;
 	MacroSettings pendingSettings;
@@ -130,6 +138,11 @@ private:
 
 	std::mutex asyncMutex;
 	RtssStatus pendingRtssStatus;
+	Updater::UpdateInfo pendingUpdateInfo;
+	Updater::InstallResult pendingUpdateResult;
+	Updater::UpdateInfo updateInfo;
+	std::string updateStatus;
+	bool updateInstalling = false;
 
 	std::mutex captureMutex;
 	bool captureActive = false;

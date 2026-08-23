@@ -218,11 +218,12 @@ NativeGui& NativeGui::getInstance() {
 	return instance;
 }
 
-bool NativeGui::create(HINSTANCE appInstance, const MacroSettings& settings, ApplyCallback apply) {
+bool NativeGui::create(HINSTANCE appInstance, const MacroSettings& settings, ApplyCallback apply, UpdateInstallCallback updateInstall) {
 	instance = appInstance;
 	savedSettings = settings;
 	pendingSettings = settings;
 	applyCallback = std::move(apply);
+	updateInstallCallback = std::move(updateInstall);
 
 	WNDCLASSEXW windowClass{};
 	windowClass.cbSize = sizeof(windowClass);
@@ -309,7 +310,23 @@ void NativeGui::postRtssStatus(const RtssStatus& status) {
 		std::lock_guard lock(asyncMutex);
 		pendingRtssStatus = status;
 	}
-	if (hwnd) PostMessageW(hwnd, WM_APP_STATUS, 0, 0);
+	if (hwnd && IsWindow(hwnd)) PostMessageW(hwnd, WM_APP_STATUS, 0, 0);
+}
+
+void NativeGui::postUpdateCheck(const Updater::UpdateInfo& info) {
+	{
+		std::lock_guard lock(asyncMutex);
+		pendingUpdateInfo = info;
+	}
+	if (hwnd && IsWindow(hwnd)) PostMessageW(hwnd, WM_APP_UPDATE_CHECK, 0, 0);
+}
+
+void NativeGui::postUpdateInstallResult(const Updater::InstallResult& result) {
+	{
+		std::lock_guard lock(asyncMutex);
+		pendingUpdateResult = result;
+	}
+	if (hwnd && IsWindow(hwnd)) PostMessageW(hwnd, WM_APP_UPDATE_RESULT, 0, 0);
 }
 
 bool NativeGui::createDeviceResources() {
@@ -588,7 +605,7 @@ void NativeGui::drawPage(float width, float height) {
 		{SettingId::RepressLeftClick, Tab::Advanced, L"Repress left click", L"Restore left click if it was held before the macro started."},
 		{SettingId::AutomaticLeftClickHandling, Tab::Advanced, L"Automatic left click handling", L"Automatically release and restore left click when shift switching weapons."},
 		{SettingId::AutomaticHorizontalKeyHandling, Tab::Advanced, L"Automatic horizontal key handling", L"Automatically release and restore A/D when shift switching weapons."},
-		{SettingId::FrameGenerationMultiplier, Tab::Advanced, L"Enhanced frame generation multiplier", L"Run queued macro steps once every 1 to 4 presented frames in GTA V Enhanced. Legacy always runs every frame."},
+		{SettingId::FrameGenerationMultiplier, Tab::Advanced, L"Frame generation multiplier", L"For compatbility with Frame Generation on Enhanced. Macros may still be more buggy."},
 		{SettingId::ExplicitRpgSwitchHotkey, Tab::Advanced, L"Explicit RPG switch", L"Guarantees a switch to RPG if your weapon loadout has the RPG in the first heavy-weapon slot."},
 		{SettingId::ExplicitHomingSwitchHotkey, Tab::Advanced, L"Explicit homing switch", L"Guarantees a switch to homing launcher if your weapon loadout has it in the second heavy-weapon slot."},
 		{SettingId::ExplicitGrenadeSwitchHotkey, Tab::Advanced, L"Explicit grenade switch", L"Guarantees a switch to grenade launcher if your weapon loadout has it in the third heavy-weapon slot."},
@@ -808,6 +825,44 @@ void NativeGui::drawNumberModal(float width, float height) {
 	addHit(apply, HitType::NumberApply);
 }
 
+void NativeGui::drawUpdateModal(float width, float height) {
+	Rect panel{width / 2.0f - 310, height / 2.0f - 190, width / 2.0f + 310, height / 2.0f + 190};
+	fillGradient(panel, kCardTop, kCardBottom, 18);
+	stroke(panel, kBorder, 18, 1.5f);
+	drawText(L"SOFTWARE UPDATE", {panel.left + 30, panel.top + 28, panel.right - 30, panel.top + 54}, smallFormat.Get(), kAccent);
+	drawText(L"A new build is ready", {panel.left + 30, panel.top + 66, panel.right - 30, panel.top + 106}, titleFormat.Get(), kText);
+	drawText(L"Download the latest version and the app will restart automatically. Saved settings stay in place.",
+		{panel.left + 30, panel.top + 112, panel.right - 30, panel.top + 155}, textFormat.Get(), kMuted);
+
+	Rect versions{panel.left + 30, panel.top + 172, panel.right - 30, panel.top + 232};
+	fillGradient(versions, kSidebarTop, kSidebarBottom, 12);
+	drawText(L"INSTALLED", {versions.left + 18, versions.top + 10, versions.left + 150, versions.top + 30}, smallFormat.Get(), kMuted);
+	drawText(L"LATEST", {versions.left + 300, versions.top + 10, versions.right - 18, versions.top + 30}, smallFormat.Get(), kMuted);
+	drawText(L"v" + toWide(updateInfo.currentVersion), {versions.left + 18, versions.top + 29, versions.left + 260, versions.bottom - 8}, navFormat.Get(), kText);
+	drawText(L"v" + toWide(updateInfo.latestVersion), {versions.left + 300, versions.top + 29, versions.right - 18, versions.bottom - 8}, navFormat.Get(), kGreen);
+
+	if (!updateStatus.empty())
+		drawText(toWide(updateStatus), {panel.left + 30, panel.top + 246, panel.right - 30, panel.top + 276}, smallFormat.Get(), updateInstalling ? kAccent : kMuted);
+
+	const bool busy = updateInstalling;
+	Rect cancel{panel.right - 390, panel.bottom - 58, panel.right - 260, panel.bottom - 22};
+	int cancelIndex = static_cast<int>(hits.size());
+	bool cancelHovered = hoverHit == cancelIndex;
+	fillGradient(cancel, cancelHovered ? mixColor(kCardTop, kCardHoverTop, hoverProgress) : kCardTop,
+		cancelHovered ? mixColor(kCardBottom, kCardHoverBottom, hoverProgress) : kCardBottom, 8);
+	drawText(L"Cancel", {cancel.left + 32, cancel.top + 9, cancel.right, cancel.bottom}, smallFormat.Get(), busy ? kMuted : kText);
+	addHit(cancel, HitType::UpdateCancel);
+
+	Rect install{panel.right - 245, panel.bottom - 58, panel.right - 30, panel.bottom - 22};
+	int installIndex = static_cast<int>(hits.size());
+	bool installHovered = hoverHit == installIndex;
+	fillGradient(install, busy ? kBorder : installHovered ? mixColor(kAccent, kAccentPurple, hoverProgress) : kAccent,
+		busy ? kCardBottom : installHovered ? kAccentPurple : kAccentDark, 8);
+	drawText(busy ? L"Downloading..." : L"Download and restart",
+		{install.left + 15, install.top + 9, install.right - 15, install.bottom}, smallFormat.Get(), busy ? kMuted : kBackground);
+	addHit(install, HitType::UpdateInstall);
+}
+
 void NativeGui::drawProfileModal(float width, float height) {
 	Rect panel{width / 2.0f - 360, height / 2.0f - 260, width / 2.0f + 360, height / 2.0f + 260};
 	fillGradient(panel, kCardTop, kCardBottom, 18);
@@ -856,6 +911,8 @@ void NativeGui::drawModal(float width, float height) {
 		drawCaptureModal(width, height);
 	} else if (modalKind == ModalKind::Number) {
 		drawNumberModal(width, height);
+	} else if (modalKind == ModalKind::Update) {
+		drawUpdateModal(width, height);
 	} else if (modalKind == ModalKind::Profile) {
 		drawProfileModal(width, height);
 	} else if (modalKind == ModalKind::Source) {
@@ -944,12 +1001,14 @@ void NativeGui::updateFrameGenerationSlider(float x) {
 void NativeGui::handleClick(float x, float y) {
 	if (modalKind != ModalKind::None && modalTarget == 0.0f) return;
 	if (modalKind != ModalKind::None && modalProgress < 0.92f) return;
+	const bool updateModal = modalKind == ModalKind::Update;
 	for (auto it = hits.rbegin(); it != hits.rend(); ++it) {
 		if (!contains(it->rect, x, y)) continue;
-		if (pageProgress < 0.92f && it->type != HitType::Tab && !sourceModal && !profileModal && !captureModal && modalKind != ModalKind::Number) continue;
-		if ((sourceModal || profileModal || captureModal || modalKind == ModalKind::Number) &&
+		if (pageProgress < 0.92f && it->type != HitType::Tab && !sourceModal && !profileModal && !captureModal && modalKind != ModalKind::Number && !updateModal) continue;
+		if ((sourceModal || profileModal || captureModal || modalKind == ModalKind::Number || updateModal) &&
 			it->type != HitType::CaptureCancel && it->type != HitType::CaptureUnbind &&
-			it->type != HitType::NumberApply && it->type != HitType::SourceLegacy && it->type != HitType::SourceEnhanced && it->type != HitType::Profile) continue;
+			it->type != HitType::NumberApply && it->type != HitType::SourceLegacy && it->type != HitType::SourceEnhanced &&
+			it->type != HitType::Profile && it->type != HitType::UpdateCancel && it->type != HitType::UpdateInstall) continue;
 		switch (it->type) {
 		case HitType::Tab:
 			if (activeTab != it->tab) {
@@ -996,6 +1055,20 @@ void NativeGui::handleClick(float x, float y) {
 		case HitType::SourceLegacy: importSource(false); break;
 		case HitType::SourceEnhanced: importSource(true); break;
 		case HitType::Profile: importProfile(it->index); break;
+		case HitType::UpdateCancel:
+			if (!updateInstalling) closeModal();
+			break;
+		case HitType::UpdateInstall:
+			if (!updateInstalling) {
+				updateInstalling = true;
+				updateStatus = "Downloading the latest build...";
+				if (updateInstallCallback) updateInstallCallback(updateInfo);
+				else {
+					updateInstalling = false;
+					updateStatus = "The updater is unavailable.";
+				}
+			}
+			break;
 		}
 		InvalidateRect(hwnd, nullptr, FALSE);
 		return;
@@ -1314,7 +1387,7 @@ LRESULT NativeGui::handleMessage(UINT messageId, WPARAM wParam, LPARAM lParam) {
 		handleMouseMove(pixelsToDips(hwnd, GET_X_LPARAM(lParam)), pixelsToDips(hwnd, GET_Y_LPARAM(lParam)));
 		return 0;
 	case WM_MOUSEWHEEL:
-		if (!sourceModal && !profileModal && !captureModal && modalKind != ModalKind::Number) {
+		if (!sourceModal && !profileModal && !captureModal && modalKind != ModalKind::Number && modalKind != ModalKind::Update) {
 			int delta = GET_WHEEL_DELTA_WPARAM(wParam);
 			targetScrollOffset = std::max(0.0f, targetScrollOffset - static_cast<float>(delta) / 4.0f);
 			InvalidateRect(hwnd, nullptr, FALSE);
@@ -1331,7 +1404,8 @@ LRESULT NativeGui::handleMessage(UINT messageId, WPARAM wParam, LPARAM lParam) {
 		}
 		return 0;
 	case WM_KEYDOWN:
-		if (wParam == VK_ESCAPE && (sourceModal || profileModal || captureModal || modalKind == ModalKind::Number)) closeModal();
+		if (wParam == VK_ESCAPE && (sourceModal || profileModal || captureModal || modalKind == ModalKind::Number ||
+			(modalKind == ModalKind::Update && !updateInstalling))) closeModal();
 		else if (wParam == 'S' && (GetKeyState(VK_CONTROL) & 0x8000)) save();
 		InvalidateRect(hwnd, nullptr, FALSE);
 		return 0;
@@ -1359,6 +1433,36 @@ LRESULT NativeGui::handleMessage(UINT messageId, WPARAM wParam, LPARAM lParam) {
 		finishNumberCapture(false);
 		InvalidateRect(hwnd, nullptr, FALSE);
 		return 0;
+	case WM_APP_UPDATE_CHECK: {
+		Updater::UpdateInfo info;
+		{
+			std::lock_guard lock(asyncMutex);
+			info = pendingUpdateInfo;
+		}
+		if (info.ok && info.available) {
+			updateInfo = std::move(info);
+			updateInstalling = false;
+			updateStatus = "Your saved settings and customizations will stay in place.";
+			openModal(ModalKind::Update);
+		}
+		return 0;
+	}
+	case WM_APP_UPDATE_RESULT: {
+		Updater::InstallResult result;
+		{
+			std::lock_guard lock(asyncMutex);
+			result = std::move(pendingUpdateResult);
+		}
+		if (result.ok) {
+			updateInstalling = false;
+			exit();
+		} else {
+			updateInstalling = false;
+			updateStatus = result.error.empty() ? "Update failed. Try again." : result.error;
+			InvalidateRect(hwnd, nullptr, FALSE);
+		}
+		return 0;
+	}
 	case WM_APP_TRAY:
 		if (lParam == WM_LBUTTONUP || lParam == WM_LBUTTONDBLCLK) show();
 		else if (lParam == WM_RBUTTONUP) {
@@ -1391,7 +1495,7 @@ LRESULT NativeGui::handleMessage(UINT messageId, WPARAM wParam, LPARAM lParam) {
 		return 0;
 	}
 	case WM_CLOSE:
-		exit();
+		if (!updateInstalling) exit();
 		return 0;
 	case WM_DESTROY:
 		if (numberEditFont) {

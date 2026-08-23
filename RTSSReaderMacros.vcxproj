@@ -147,6 +147,7 @@
     <ClCompile Include="Keybind.cpp" />
     <ClCompile Include="HookHandler.cpp" />
     <ClCompile Include="Gui.cpp" />
+    <ClCompile Include="Updater.cpp" />
     <ClCompile Include="keymap.cpp">
       <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Speed</FavorSizeOrSpeed>
       <OmitFramePointers Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</OmitFramePointers>
@@ -172,6 +173,7 @@
     <ClInclude Include="Keybind.h" />
     <ClInclude Include="HookHandler.h" />
     <ClInclude Include="Gui.h" />
+    <ClInclude Include="Updater.h" />
     <ClInclude Include="keymap.h" />
     <ClInclude Include="RTSSReader.h" />
     <ClInclude Include="Settings.h" />
