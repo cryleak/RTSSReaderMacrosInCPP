@@ -1,6 +1,6 @@
 # RTSS Reader Macros
 
-Speedy GTA macros. Same speed as old AutoHotkey macros. May not work well on CPUs with 4 cores or less.
+Speedy GTA macros. Same speed as old AutoHotkey macros. May not work well on CPUs with 4 cores or less. GUI is vibecoded because i don't like writing GUI code.
 
 ## Requirements
 
