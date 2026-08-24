@@ -41,6 +41,7 @@ enum class SettingId
     RpgSpamHotkey,
     SniperSpamHotkey,
     DoubleSwitchHotkey,
+    TripleSwitchHotkey,
     RpgTabSwitchHotkey,
     StickyBombTabSwitchHotkey,
     SniperTabSwitchHotkey,
@@ -88,6 +89,7 @@ struct MacroSettings
     KeyChord rpgSpamHotkey;
     KeyChord sniperSpamHotkey;
     KeyChord doubleSwitchHotkey;
+    KeyChord tripleSwitchHotkey;
     KeyChord rpgTabSwitchHotkey;
     KeyChord stickyBombTabSwitchHotkey;
     KeyChord sniperTabSwitchHotkey;

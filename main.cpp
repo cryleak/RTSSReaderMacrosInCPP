@@ -321,6 +321,17 @@ namespace
         rememberTabSwitch(settings.rpgKey);
     }
 
+    void queueTripleSwitch(const MacroSettings& settings)
+    {
+        if (settings.rpgKey.empty() || settings.weaponWheelKey.empty()) return;
+        const AutomaticSwitchState automatic = prepareAutomaticSwitch(settings, settings.rpgKey);
+        InputHandler::getInstance().queueInputs({
+                                                    inputName(settings.rpgKey) + " 2", inputName(settings.rpgKey) + " down",
+                                                    inputName(settings.weaponWheelKey) + "R", inputName(settings.rpgKey) + " upR",
+                                                }, [automatic] { queueAutomaticSwitchRestore(automatic); });
+        rememberTabSwitch(settings.rpgKey);
+    }
+
     bool validateSettings(const MacroSettings& settings, std::string& error)
     {
         if (settings.frameGenerationMultiplier < 1 || settings.frameGenerationMultiplier > 4)
@@ -328,7 +339,7 @@ namespace
             error = "Enhanced frame generation multiplier must be between 1 and 4.";
             return false;
         }
-        const std::array<std::pair<const KeyChord*, const char*>, 23> triggers = {
+        const std::array<std::pair<const KeyChord*, const char*>, 24> triggers = {
             {
                 {&settings.bstHotkey, "BST"}, {&settings.thermalHotkey, "thermal"}, {&settings.snacksHotkey, "snacks"},
                 {&settings.ammoHotkey, "ammo"}, {&settings.quickTurnHotkey, "quick turn"}, {&settings.rpgTabSwitchHotkey, "RPG tab switch"},
@@ -340,7 +351,7 @@ namespace
                 {&settings.smgTabSwitchHotkey, "SMG tab switch"},
                 {&settings.fistsTabSwitchHotkey, "fists tab switch"},
                 {&settings.meleeTabSwitchHotkey, "melee tab switch"},
-                {&settings.rpgSpamHotkey, "RPG spam"}, {&settings.sniperSpamHotkey, "sniper spam"}, {&settings.doubleSwitchHotkey, "double switch"},
+                {&settings.rpgSpamHotkey, "RPG spam"}, {&settings.sniperSpamHotkey, "sniper spam"}, {&settings.doubleSwitchHotkey, "double switch"}, {&settings.tripleSwitchHotkey, "triple switch"},
                 {&settings.chatKey, "chat"}, {&settings.explicitRpgSwitchHotkey, "explicit RPG switch"},
                 {&settings.explicitHomingSwitchHotkey, "explicit homing switch"},
                 {&settings.explicitGrenadeSwitchHotkey, "explicit grenade switch"},
@@ -385,6 +396,7 @@ namespace
         Keybind::add(settings.rpgSpamHotkey, [settings] { queueRpgSpam(settings); }, false, "RPG spam");
         Keybind::add(settings.sniperSpamHotkey, [settings] { queueSniperSpam(settings); }, false, "Sniper spam");
         Keybind::add(settings.doubleSwitchHotkey, [settings] { queueDoubleSwitch(settings); }, false, "Double switch");
+        Keybind::add(settings.tripleSwitchHotkey, [settings] { queueTripleSwitch(settings); }, false, "Triple switch");
         Keybind::add(settings.explicitRpgSwitchHotkey, [settings] { queueExplicitWeaponSwitch(settings, settings.rpgKey, 1); }, false, "Explicit RPG switch");
         Keybind::add(settings.explicitHomingSwitchHotkey, [settings] { queueExplicitWeaponSwitch(settings, settings.rpgKey, 2); }, false, "Explicit homing switch");
         Keybind::add(settings.explicitGrenadeSwitchHotkey, [settings] { queueExplicitWeaponSwitch(settings, settings.rpgKey, 3); }, false, "Explicit grenade switch");

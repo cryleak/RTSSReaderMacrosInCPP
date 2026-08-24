@@ -212,6 +212,7 @@ namespace
         case SettingId::RpgSpamHotkey: return L"RPG spam macro";
         case SettingId::SniperSpamHotkey: return L"Sniper spam macro";
         case SettingId::DoubleSwitchHotkey: return L"Double switch macro";
+        case SettingId::TripleSwitchHotkey: return L"Triple switch macro";
         case SettingId::InteractionMenuKey: return L"Interaction menu";
         case SettingId::WeaponWheelKey: return L"Weapon wheel";
         case SettingId::ChatKey: return L"Chat";
@@ -648,6 +649,7 @@ void NativeGui::drawPage(float width, float height)
         {SettingId::RpgSpamHotkey, Tab::Weapons, L"RPG spam macro", L"Switch through sticky bomb to the RPG."},
         {SettingId::SniperSpamHotkey, Tab::Weapons, L"Sniper spam macro", L"Switch through sticky bomb to the sniper."},
         {SettingId::DoubleSwitchHotkey, Tab::Weapons, L"Double switch macro", L"Presses the heavy weapon keybind twice to allow for faster switching between heavy weapons."},
+        {SettingId::TripleSwitchHotkey, Tab::Weapons, L"Triple switch macro", L"Presses the heavy weapon keybind thrice to allow for faster switching between heavy weapons."},
         {SettingId::RpgTabSwitchHotkey, Tab::Weapons, L"RPG / heavy weapon tab switch", L"Macro hotkey that switches to this weapon."},
         {SettingId::StickyBombTabSwitchHotkey, Tab::Weapons, L"Sticky bomb tab switch", L"Macro hotkey that switches to this weapon."},
         {SettingId::SniperTabSwitchHotkey, Tab::Weapons, L"Sniper tab switch", L"Macro hotkey that switches to this weapon."},

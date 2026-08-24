@@ -303,6 +303,7 @@ const std::vector<SettingDefinition>& settingDefinitions()
         SettingDefinition{SettingId::RpgSpamHotkey, "rpg_spam_hotkey", SettingType::KeyChord, &MacroSettings::rpgSpamHotkey},
         SettingDefinition{SettingId::SniperSpamHotkey, "sniper_spam_hotkey", SettingType::KeyChord, &MacroSettings::sniperSpamHotkey},
         SettingDefinition{SettingId::DoubleSwitchHotkey, "double_switch_hotkey", SettingType::KeyChord, &MacroSettings::doubleSwitchHotkey},
+        SettingDefinition{SettingId::TripleSwitchHotkey, "triple_switch_hotkey", SettingType::KeyChord, &MacroSettings::tripleSwitchHotkey},
         SettingDefinition{SettingId::RpgTabSwitchHotkey, "rpg_tab_switch_hotkey", SettingType::KeyChord, &MacroSettings::rpgTabSwitchHotkey},
         SettingDefinition{SettingId::StickyBombTabSwitchHotkey, "sticky_bomb_tab_switch_hotkey", SettingType::KeyChord, &MacroSettings::stickyBombTabSwitchHotkey},
         SettingDefinition{SettingId::SniperTabSwitchHotkey, "sniper_tab_switch_hotkey", SettingType::KeyChord, &MacroSettings::sniperTabSwitchHotkey},
