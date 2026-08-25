@@ -16,6 +16,7 @@
 
 #define NOMINMAX
 #include <Windows.h>
+#include <intrin.h>
 #include <mmsystem.h>
 #include <algorithm>
 #include <mutex>
@@ -23,6 +24,8 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <iostream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -34,6 +37,20 @@ using namespace std::chrono_literals;
 
 namespace
 {
+    void enableConsole()
+    {
+        if (!GetConsoleWindow() && !AllocConsole()) return;
+
+        FILE* stream = nullptr;
+        freopen_s(&stream, "CONOUT$", "w", stdout);
+        freopen_s(&stream, "CONOUT$", "w", stderr);
+        freopen_s(&stream, "CONIN$", "r", stdin);
+        std::cout.clear();
+        std::cerr.clear();
+        std::cin.clear();
+        std::cout << "RTSS Reader Macros console enabled." << std::endl;
+    }
+
     std::string inputName(const KeyChord& key)
     {
         return keyName(key.key);
@@ -49,6 +66,8 @@ namespace
     std::mutex quickTurnMutex;
     QuickTurnState quickTurnState;
     std::atomic_int enhancedFrameGenerationMultiplier{1};
+    std::atomic_bool preciseRtssPolling{false};
+    std::atomic_int pauseInstructionsInTimespan{1};
 
     double performanceMilliseconds()
     {
@@ -416,6 +435,7 @@ namespace
         if (!validateSettings(settings, error)) return false;
         if (!SettingsStore::save(settings, error)) return false;
         enhancedFrameGenerationMultiplier.store(std::clamp(settings.frameGenerationMultiplier, 1, 4), std::memory_order_relaxed);
+        preciseRtssPolling.store(settings.preciseRtssPolling, std::memory_order_relaxed);
         InputHandler::getInstance().clearQueuedTasks();
         InputHandler::getInstance().releaseCursor();
         HookHandler::getInstance().inChat = false;
@@ -428,6 +448,7 @@ namespace
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 {
     if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) SetProcessDPIAware();
+    if (commandLine && wcsstr(commandLine, L"--console")) enableConsole();
     if (commandLine && wcsstr(commandLine, L"--self-test"))
     {
         std::string error;
@@ -437,6 +458,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
     std::vector<std::string> warnings;
     MacroSettings settings = SettingsStore::load(&warnings);
     enhancedFrameGenerationMultiplier.store(std::clamp(settings.frameGenerationMultiplier, 1, 4), std::memory_order_relaxed);
+    preciseRtssPolling.store(settings.preciseRtssPolling, std::memory_order_relaxed);
     installKeybinds(settings);
 
     NativeGui& gui = NativeGui::getInstance();
@@ -471,6 +493,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
     {
         gui.postUpdateCheck(Updater::checkForUpdate());
     });
+
+    const auto pauseStart = startTiming();
+    uint64_t pauseCount = 0;
+    while (std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - pauseStart).count() < 100.0)
+    {
+        _mm_pause();
+        ++pauseCount;
+    }
+    const double pauseTestMilliseconds = stopTiming(pauseStart);
+    const double pausesInThreshold = // 15 microseconds
+        static_cast<double>(pauseCount) * 15.0 / (pauseTestMilliseconds * 1000.0);
+    pauseInstructionsInTimespan.store(std::max(1, static_cast<int>(std::llround(pausesInThreshold))), std::memory_order_relaxed);
+    std::cout << "_mm_pause count in " << pauseTestMilliseconds << "ms: " << pauseCount
+        << "; estimated pauses in timespan: " << pausesInThreshold << std::endl;
 
     std::atomic_bool running = true;
     std::thread rtssThread([&]
@@ -510,6 +547,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
         int framesDetected = 0;
         while (running)
         {
+            // auto start = startTiming();
             uint64_t present = RTSSReader::getInstance().presentTime();
             if (present && present != previousPresentTime)
             {
@@ -526,11 +564,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 
             if (!InputHandler::getInstance().hasQueuedTasks())
             {
-                LARGE_INTEGER dueTime{};
-                dueTime.QuadPart = -5000;
-                SetWaitableTimer(highResolutionTimer, &dueTime, 0, nullptr, nullptr, FALSE);
-                WaitForSingleObject(highResolutionTimer, INFINITE);
+                if (preciseRtssPolling.load(std::memory_order_relaxed))
+                {
+                    const int pauseCount = pauseInstructionsInTimespan.load(std::memory_order_relaxed);
+                    for (int i = 0; i < pauseCount * 1.5; ++i) _mm_pause(); // multiply by 1.5 because idk
+                }
+                else
+                {
+                    LARGE_INTEGER dueTime{};
+                    dueTime.QuadPart = -5000;
+                    SetWaitableTimer(highResolutionTimer, &dueTime, 0, nullptr, nullptr, FALSE);
+                    WaitForSingleObject(highResolutionTimer, INFINITE);
+                }
             }
+            else
+            {
+                _mm_pause(); // call once cause i think its good to do while spinwaiting in general
+            }
+            // auto stop = stopTiming(start);
+            // std::cout << "Took " << stop << "ms" << std::endl;
         }
         if (highResolutionTimer) CloseHandle(highResolutionTimer);
         timeEndPeriod(1);

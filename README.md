@@ -14,3 +14,5 @@ Speedy GTA macros. Same speed as old AutoHotkey macros. May not work well on CPU
 - Configure macros
 - Save your changes
 - Play the game
+
+Launch with `--console` to show a console window for `std::cout` output while the GUI runs.

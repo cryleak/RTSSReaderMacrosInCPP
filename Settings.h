@@ -59,6 +59,7 @@ enum class SettingId
     RepressLeftClick,
     AutomaticLeftClickHandling,
     AutomaticHorizontalKeyHandling,
+    PreciseRtssPolling,
     ExplicitRpgSwitchHotkey,
     ExplicitHomingSwitchHotkey,
     ExplicitGrenadeSwitchHotkey,
@@ -109,6 +110,7 @@ struct MacroSettings
     bool repressLeftClick = true;
     bool automaticLeftClickHandling = false;
     bool automaticHorizontalKeyHandling = false;
+    bool preciseRtssPolling = false;
     KeyChord explicitRpgSwitchHotkey;
     KeyChord explicitHomingSwitchHotkey;
     KeyChord explicitGrenadeSwitchHotkey;

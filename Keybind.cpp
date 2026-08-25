@@ -27,10 +27,7 @@ void Keybind::add(const KeyChord& chord, std::function<void()> function, bool al
         keybindStartTime = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
         if (suspendToggle) suspended.store(!suspended.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        InputHandler::getInstance().queueTask(0, [function]()
-        {
-            function();
-        }, false);
+        function();
     };
     keybind.allowInChat = allowInChat;
     keybind.name = std::move(name);

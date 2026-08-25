@@ -220,6 +220,7 @@ namespace
         case SettingId::RepressLeftClick: return L"Repress left click";
         case SettingId::AutomaticLeftClickHandling: return L"Automatic left click handling";
         case SettingId::AutomaticHorizontalKeyHandling: return L"Automatic horizontal key handling";
+        case SettingId::PreciseRtssPolling: return L"Precise RTSS polling";
         case SettingId::ExplicitRpgSwitchHotkey: return L"Explicit RPG switch";
         case SettingId::ExplicitHomingSwitchHotkey: return L"Explicit homing switch";
         case SettingId::ExplicitGrenadeSwitchHotkey: return L"Explicit grenade switch";
@@ -675,6 +676,7 @@ void NativeGui::drawPage(float width, float height)
         {SettingId::RepressLeftClick, Tab::Advanced, L"Repress left click", L"Restore left click if it was held before the macro started."},
         {SettingId::AutomaticLeftClickHandling, Tab::Advanced, L"Automatic left click handling", L"Automatically release and restore left click when shift switching weapons."},
         {SettingId::AutomaticHorizontalKeyHandling, Tab::Advanced, L"Automatic horizontal key handling", L"Automatically release and restore A/D when shift switching weapons."},
+        {SettingId::PreciseRtssPolling, Tab::Advanced, L"Precise RTSS polling", L"Spin with _mm_pause instead of sleeping with unreliable Windows methods. Uses more CPU."},
         {SettingId::FrameGenerationMultiplier, Tab::Advanced, L"Frame generation multiplier", L"For compatbility with Frame Generation on Enhanced. Macros may still be more buggy."},
         {SettingId::ExplicitRpgSwitchHotkey, Tab::Advanced, L"Explicit RPG switch", L"Guarantees a switch to RPG if your weapon loadout has the RPG in the first heavy-weapon slot."},
         {SettingId::ExplicitHomingSwitchHotkey, Tab::Advanced, L"Explicit homing switch", L"Guarantees a switch to homing launcher if your weapon loadout has it in the second heavy-weapon slot."},
