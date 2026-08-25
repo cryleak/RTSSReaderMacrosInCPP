@@ -182,9 +182,6 @@ private:
     Microsoft::WRL::ComPtr<ID2D1Factory> d2dFactory;
     Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> renderTarget;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> solidBrush;
-    Microsoft::WRL::ComPtr<ID2D1Bitmap> ditherBitmap;
-    Microsoft::WRL::ComPtr<ID2D1BitmapBrush> ditherBrush;
-    std::unordered_map<std::uint64_t, Microsoft::WRL::ComPtr<ID2D1LinearGradientBrush>> gradientBrushes;
     Microsoft::WRL::ComPtr<IDWriteFactory> writeFactory;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> textFormat;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> smallFormat;

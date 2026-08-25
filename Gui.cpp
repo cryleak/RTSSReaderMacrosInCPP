@@ -27,25 +27,25 @@ namespace
 {
     using Microsoft::WRL::ComPtr;
 
-    const D2D1::ColorF kBackground(0.025f, 0.030f, 0.050f, 1.0f);
-    const D2D1::ColorF kBackgroundTop(0.020f, 0.030f, 0.070f, 1.0f);
-    const D2D1::ColorF kBackgroundBottom(0.055f, 0.025f, 0.085f, 1.0f);
-    const D2D1::ColorF kSidebar(0.040f, 0.050f, 0.090f, 1.0f);
-    const D2D1::ColorF kSidebarTop(0.040f, 0.060f, 0.120f, 1.0f);
-    const D2D1::ColorF kSidebarBottom(0.028f, 0.032f, 0.065f, 1.0f);
-    const D2D1::ColorF kCard(0.073f, 0.086f, 0.116f, 1.0f);
-    const D2D1::ColorF kCardTop(0.095f, 0.115f, 0.175f, 1.0f);
-    const D2D1::ColorF kCardBottom(0.070f, 0.075f, 0.130f, 1.0f);
-    const D2D1::ColorF kCardHover(0.095f, 0.112f, 0.150f, 1.0f);
-    const D2D1::ColorF kCardHoverTop(0.125f, 0.170f, 0.235f, 1.0f);
-    const D2D1::ColorF kCardHoverBottom(0.085f, 0.110f, 0.180f, 1.0f);
-    const D2D1::ColorF kBorder(0.170f, 0.205f, 0.290f, 1.0f);
-    const D2D1::ColorF kText(0.91f, 0.94f, 0.98f, 1.0f);
-    const D2D1::ColorF kMuted(0.52f, 0.58f, 0.68f, 1.0f);
-    const D2D1::ColorF kAccent(0.26f, 0.82f, 0.93f, 1.0f);
-    const D2D1::ColorF kAccentPurple(0.62f, 0.30f, 0.96f, 1.0f);
-    const D2D1::ColorF kAccentDark(0.08f, 0.27f, 0.34f, 1.0f);
-    const D2D1::ColorF kAccentDarkPurple(0.22f, 0.12f, 0.42f, 1.0f);
+    const D2D1::ColorF kBackground(0.035f, 0.055f, 0.085f, 1.0f);
+    const D2D1::ColorF kBackgroundTop(0.035f, 0.055f, 0.085f, 1.0f);
+    const D2D1::ColorF kBackgroundBottom(0.035f, 0.055f, 0.085f, 1.0f);
+    const D2D1::ColorF kSidebar(0.045f, 0.085f, 0.135f, 1.0f);
+    const D2D1::ColorF kSidebarTop(0.045f, 0.085f, 0.135f, 1.0f);
+    const D2D1::ColorF kSidebarBottom(0.045f, 0.085f, 0.135f, 1.0f);
+    const D2D1::ColorF kCard(0.075f, 0.130f, 0.200f, 1.0f);
+    const D2D1::ColorF kCardTop(0.075f, 0.130f, 0.200f, 1.0f);
+    const D2D1::ColorF kCardBottom(0.075f, 0.130f, 0.200f, 1.0f);
+    const D2D1::ColorF kCardHover(0.100f, 0.190f, 0.290f, 1.0f);
+    const D2D1::ColorF kCardHoverTop(0.100f, 0.190f, 0.290f, 1.0f);
+    const D2D1::ColorF kCardHoverBottom(0.100f, 0.190f, 0.290f, 1.0f);
+    const D2D1::ColorF kBorder(0.160f, 0.300f, 0.440f, 1.0f);
+    const D2D1::ColorF kText(0.90f, 0.95f, 1.0f, 1.0f);
+    const D2D1::ColorF kMuted(0.56f, 0.70f, 0.84f, 1.0f);
+    const D2D1::ColorF kAccent(0.30f, 0.65f, 1.0f, 1.0f);
+    const D2D1::ColorF kAccentPurple(0.38f, 0.58f, 0.96f, 1.0f);
+    const D2D1::ColorF kAccentDark(0.08f, 0.24f, 0.40f, 1.0f);
+    const D2D1::ColorF kAccentDarkPurple(0.11f, 0.19f, 0.32f, 1.0f);
     const D2D1::ColorF kGreen(0.32f, 0.90f, 0.57f, 1.0f);
     const D2D1::ColorF kAmber(1.0f, 0.69f, 0.26f, 1.0f);
     const D2D1::ColorF kRed(1.0f, 0.34f, 0.40f, 1.0f);
@@ -108,20 +108,6 @@ namespace
     {
         color.a *= clamp01(alpha);
         return color;
-    }
-
-    std::uint32_t packGradientColor(D2D1::ColorF color)
-    {
-        auto channel = [](float value)
-        {
-            return static_cast<std::uint32_t>(std::lround(clamp01(value) * 255.0f));
-        };
-        return (channel(color.r) << 24) | (channel(color.g) << 16) | (channel(color.b) << 8) | channel(color.a);
-    }
-
-    std::uint64_t gradientKey(D2D1::ColorF first, D2D1::ColorF second)
-    {
-        return (static_cast<std::uint64_t>(packGradientColor(first)) << 32) | packGradientColor(second);
     }
 
     std::wstring keyListName(const std::vector<WORD>& keys)
@@ -382,32 +368,6 @@ bool NativeGui::createDeviceResources()
         D2D1::HwndRenderTargetProperties(hwnd, D2D1::SizeU(std::max(1L, client.right), std::max(1L, client.bottom)), D2D1_PRESENT_OPTIONS_NONE), &renderTarget)))
         return false;
     if (FAILED(renderTarget->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 0), &solidBrush))) return false;
-    std::array<std::uint32_t, 64> ditherPixels{};
-    constexpr std::array<std::uint8_t, 64> ditherPattern = {
-        0, 1, 0, 1, 1, 0, 1, 0,
-        1, 0, 1, 0, 0, 1, 0, 1,
-        0, 1, 1, 0, 0, 1, 1, 0,
-        1, 0, 0, 1, 1, 0, 0, 1,
-        1, 0, 1, 0, 0, 1, 0, 1,
-        0, 1, 0, 1, 1, 0, 1, 0,
-        1, 0, 0, 1, 1, 0, 0, 1,
-        0, 1, 1, 0, 0, 1, 1, 0,
-    };
-    for (size_t i = 0; i < ditherPixels.size(); ++i)
-    {
-        constexpr std::uint32_t alpha = 6;
-        const std::uint32_t channel = ditherPattern[i] ? alpha : 0;
-        ditherPixels[i] = (alpha << 24) | (channel << 16) | (channel << 8) | channel;
-    }
-    if (FAILED(renderTarget->CreateBitmap(
-        D2D1::SizeU(8, 8), ditherPixels.data(), 8 * sizeof(std::uint32_t),
-        D2D1::BitmapProperties(D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)), &ditherBitmap)))
-        return false;
-    if (FAILED(renderTarget->CreateBitmapBrush(
-        ditherBitmap.Get(),
-        D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR),
-        D2D1::BrushProperties(1.0f, D2D1::IdentityMatrix()), &ditherBrush)))
-        return false;
     UINT dpi = windowDpi(hwnd);
     renderTarget->SetDpi(static_cast<float>(dpi), static_cast<float>(dpi));
     writeFactory->CreateTextFormat(L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
@@ -428,9 +388,6 @@ bool NativeGui::createDeviceResources()
 
 void NativeGui::discardDeviceResources()
 {
-    gradientBrushes.clear();
-    ditherBrush.Reset();
-    ditherBitmap.Reset();
     solidBrush.Reset();
     renderTarget.Reset();
 }
@@ -518,45 +475,9 @@ void NativeGui::fill(Rect rect, D2D1::ColorF color, float radius)
     else renderTarget->FillRectangle(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), solidBrush.Get());
 }
 
-void NativeGui::fillGradient(Rect rect, D2D1::ColorF first, D2D1::ColorF second, float radius)
+void NativeGui::fillGradient(Rect rect, D2D1::ColorF first, D2D1::ColorF, float radius)
 {
-    first.a *= drawOpacity;
-    second.a *= drawOpacity;
-    const std::uint64_t key = gradientKey(first, second);
-    auto it = gradientBrushes.find(key);
-    if (it == gradientBrushes.end())
-    {
-        D2D1_GRADIENT_STOP stops[] = {
-            {0.0f, first},
-            {0.28f, mixColor(first, second, 0.18f)},
-            {0.56f, mixColor(first, second, 0.52f)},
-            {0.82f, mixColor(first, second, 0.82f)},
-            {1.0f, second},
-        };
-        ComPtr<ID2D1GradientStopCollection> collection;
-        if (FAILED(renderTarget->CreateGradientStopCollection(stops, 5, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP, &collection))) return;
-        D2D1_BRUSH_PROPERTIES brushProperties{};
-        brushProperties.opacity = 1.0f;
-        brushProperties.transform = D2D1::Matrix3x2F::Identity();
-        ComPtr<ID2D1LinearGradientBrush> brush;
-        if (FAILED(renderTarget->CreateLinearGradientBrush(
-            D2D1::LinearGradientBrushProperties(D2D1::Point2F(rect.left, rect.top), D2D1::Point2F(rect.right, rect.top)),
-            brushProperties, collection.Get(), &brush)))
-            return;
-        it = gradientBrushes.emplace(key, std::move(brush)).first;
-    }
-    ID2D1LinearGradientBrush* brush = it->second.Get();
-    brush->SetStartPoint(D2D1::Point2F(rect.left, rect.top));
-    brush->SetEndPoint(D2D1::Point2F(rect.right, rect.top));
-    if (radius > 0.0f) renderTarget->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), radius, radius), brush);
-    else renderTarget->FillRectangle(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), brush);
-    if (ditherBrush && std::max(first.a, second.a) > 0.01f)
-    {
-        ditherBrush->SetOpacity(std::max(first.a, second.a) * 0.7f);
-        if (radius > 0.0f) renderTarget->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), radius, radius), ditherBrush.Get());
-        else renderTarget->FillRectangle(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), ditherBrush.Get());
-        ditherBrush->SetOpacity(1.0f);
-    }
+    fill(rect, first, radius);
 }
 
 void NativeGui::stroke(Rect rect, D2D1::ColorF color, float radius, float width)

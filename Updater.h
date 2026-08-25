@@ -4,7 +4,7 @@
 
 namespace Updater
 {
-    inline constexpr char kCurrentVersion[] = "1.0.1";
+    inline constexpr char kCurrentVersion[] = "1.0.2";
 
     struct UpdateInfo
     {
