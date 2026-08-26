@@ -7,7 +7,7 @@ Speedy GTA macros. Same speed as old AutoHotkey macros. May not work well on CPU
 - Windows 10 or higher
 - Visual C++ Redistributable
 - RivaTuner Statistics Server with the GTA V or GTA V Enhanced executable's application detection level set to high.
-[Example RivaTuner configuration](https://i.troplo.com/i/7d15f779decc.gif). You must also enable Inject NVIDIA Reflex latency markers
+[Example RivaTuner configuration](https://i.troplo.com/i/7d15f779decc.gif).
 
 ## How to use
 - Open it
