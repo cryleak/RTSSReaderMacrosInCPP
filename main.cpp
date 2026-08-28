@@ -4,6 +4,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#define DEBUG_PRESENT_TIME 0
 #include "Gui.h"
 #include "HookHandler.h"
 #include "InputHandler.h"
@@ -16,6 +17,9 @@
 
 #define NOMINMAX
 #include <Windows.h>
+#if DEBUG_PRESENT_TIME
+#include "PMDPSharedMemory.h"
+#endif
 #include <intrin.h>
 #include <mmsystem.h>
 #include <algorithm>
@@ -25,6 +29,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -37,6 +43,166 @@ using namespace std::chrono_literals;
 
 namespace
 {
+    class TeeBuffer final : public std::streambuf
+    {
+    public:
+        void set(std::streambuf* first, std::streambuf* second)
+        {
+            this->first = first;
+            this->second = second;
+        }
+
+    protected:
+        int_type overflow(int_type value) override
+        {
+            if (traits_type::eq_int_type(value, traits_type::eof())) return traits_type::not_eof(value);
+            if (first->sputc(value) == traits_type::eof() || second->sputc(value) == traits_type::eof())
+                return traits_type::eof();
+            return value;
+        }
+
+        int sync() override
+        {
+            return first->pubsync() == 0 && second->pubsync() == 0 ? 0 : -1;
+        }
+
+    private:
+        std::streambuf* first = nullptr;
+        std::streambuf* second = nullptr;
+    };
+
+    class CoutLog
+    {
+    public:
+        bool open()
+        {
+            file.open("RTSSReaderMacros.log", std::ios::out | std::ios::trunc);
+            if (!file) return false;
+            original = std::cout.rdbuf();
+            tee.set(original, file.rdbuf());
+            std::cout.rdbuf(&tee);
+            return true;
+        }
+
+        ~CoutLog()
+        {
+            if (!original) return;
+            std::cout.flush();
+            std::cout.rdbuf(original);
+        }
+
+    private:
+        std::ofstream file;
+        TeeBuffer tee;
+        std::streambuf* original = nullptr;
+    };
+
+#if DEBUG_PRESENT_TIME
+    constexpr DWORD kPresentMonSignature = (static_cast<DWORD>('P') << 24) |
+        (static_cast<DWORD>('M') << 16) |
+        (static_cast<DWORD>('D') << 8) |
+        static_cast<DWORD>('P');
+
+    struct PresentMonSnapshot
+    {
+        bool available = false;
+        bool positionChanged = false;
+        bool counterReset = false;
+        DWORD status = 0;
+        DWORD frameCount = 0;
+        DWORD framePos = 0;
+        DWORD latestProcessId = 0;
+        DWORD latestPresentMode = 0;
+        double latestDisplayedTime = 0.0;
+        uint64_t framesSincePoll = 0;
+    };
+
+    class PresentMonDebug
+    {
+    public:
+        ~PresentMonDebug()
+        {
+            close();
+        }
+
+        PresentMonSnapshot poll()
+        {
+            PresentMonSnapshot result;
+            if (!pMapAddr && !open()) return result;
+            if (!pMapAddr || pMapAddr->dwSignature != kPresentMonSignature)
+            {
+                close();
+                return result;
+            }
+
+            const DWORD maxFrameCount = static_cast<DWORD>(std::size(pMapAddr->arrFrame));
+            if (pMapAddr->dwFrameArrOffset != offsetof(PMDP_SHARED_MEMORY, arrFrame) ||
+                pMapAddr->dwFrameArrEntrySize != sizeof(PMDP_FRAME_DATA) ||
+                pMapAddr->dwFrameArrSize == 0 || pMapAddr->dwFrameArrSize > maxFrameCount ||
+                pMapAddr->dwFramePos >= pMapAddr->dwFrameArrSize)
+            {
+                close();
+                return result;
+            }
+
+            result.available = true;
+            result.status = pMapAddr->dwStatus;
+            result.frameCount = pMapAddr->dwFrameCount;
+            result.framePos = pMapAddr->dwFramePos;
+
+            if (hasPreviousFrameCount)
+            {
+                result.counterReset = result.frameCount < previousFrameCount;
+                result.framesSincePoll = result.counterReset ? result.frameCount :
+                    result.frameCount - previousFrameCount;
+                result.positionChanged = result.framePos != previousFramePos;
+            }
+            hasPreviousFrameCount = true;
+            previousFrameCount = result.frameCount;
+            previousFramePos = result.framePos;
+
+            if (result.frameCount)
+            {
+                const DWORD latestPosition = (result.framePos + pMapAddr->dwFrameArrSize - 1) % pMapAddr->dwFrameArrSize;
+                const PMDP_FRAME_DATA& latest = pMapAddr->arrFrame[latestPosition];
+                result.latestProcessId = latest.data1.ProcessID;
+                result.latestPresentMode = latest.data1.PresentMode;
+                result.latestDisplayedTime = latest.data2.DisplayedTime;
+            }
+            return result;
+        }
+
+    private:
+        bool open()
+        {
+            hMapFile = OpenFileMappingW(FILE_MAP_READ, FALSE, L"PMDPSharedMemory");
+            if (!hMapFile) return false;
+            pMapAddr = reinterpret_cast<PMDP_SHARED_MEMORY*>(MapViewOfFile(hMapFile, FILE_MAP_READ, 0, 0, 0));
+            if (pMapAddr) return true;
+            CloseHandle(hMapFile);
+            hMapFile = nullptr;
+            return false;
+        }
+
+        void close()
+        {
+            if (pMapAddr) UnmapViewOfFile(pMapAddr);
+            if (hMapFile) CloseHandle(hMapFile);
+            pMapAddr = nullptr;
+            hMapFile = nullptr;
+            hasPreviousFrameCount = false;
+            previousFrameCount = 0;
+            previousFramePos = 0;
+        }
+
+        HANDLE hMapFile = nullptr;
+        PMDP_SHARED_MEMORY* pMapAddr = nullptr;
+        bool hasPreviousFrameCount = false;
+        DWORD previousFrameCount = 0;
+        DWORD previousFramePos = 0;
+    };
+#endif
+
     void enableConsole()
     {
         if (!GetConsoleWindow() && !AllocConsole()) return;
@@ -67,6 +233,8 @@ namespace
     QuickTurnState quickTurnState;
     std::atomic_int enhancedFrameGenerationMultiplier{1};
     std::atomic_bool preciseRtssPolling{false};
+    std::atomic_bool frameDetectionCompatibilityMode{false};
+    std::atomic_bool maximizeReliability{false};
     std::atomic_int pauseInstructionsInTimespan{1};
 
     double performanceMilliseconds()
@@ -436,6 +604,8 @@ namespace
         if (!SettingsStore::save(settings, error)) return false;
         enhancedFrameGenerationMultiplier.store(std::clamp(settings.frameGenerationMultiplier, 1, 4), std::memory_order_relaxed);
         preciseRtssPolling.store(settings.preciseRtssPolling, std::memory_order_relaxed);
+        frameDetectionCompatibilityMode.store(settings.frameDetectionCompatibilityMode, std::memory_order_relaxed);
+        maximizeReliability.store(settings.maximizeReliability, std::memory_order_relaxed);
         InputHandler::getInstance().clearQueuedTasks();
         InputHandler::getInstance().releaseCursor();
         HookHandler::getInstance().inChat = false;
@@ -448,7 +618,14 @@ namespace
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 {
     if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) SetProcessDPIAware();
-    if (commandLine && wcsstr(commandLine, L"--console")) enableConsole();
+#if DEBUG_PRESENT_TIME
+    constexpr bool outputEnabled = true;
+#else
+    const bool outputEnabled = commandLine && wcsstr(commandLine, L"--console");
+#endif
+    CoutLog coutLog;
+    if (outputEnabled) coutLog.open();
+    if (outputEnabled) enableConsole();
     if (commandLine && wcsstr(commandLine, L"--self-test"))
     {
         std::string error;
@@ -459,6 +636,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
     MacroSettings settings = SettingsStore::load(&warnings);
     enhancedFrameGenerationMultiplier.store(std::clamp(settings.frameGenerationMultiplier, 1, 4), std::memory_order_relaxed);
     preciseRtssPolling.store(settings.preciseRtssPolling, std::memory_order_relaxed);
+    frameDetectionCompatibilityMode.store(settings.frameDetectionCompatibilityMode, std::memory_order_relaxed);
+    maximizeReliability.store(settings.maximizeReliability, std::memory_order_relaxed);
     installKeybinds(settings);
 
     NativeGui& gui = NativeGui::getInstance();
@@ -544,18 +723,147 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
         timeBeginPeriod(1);
         HANDLE highResolutionTimer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
         uint64_t previousPresentTime = 0;
+#if DEBUG_PRESENT_TIME
+        constexpr std::array<const char*, 17> timingNames = {
+            "qwInputSampleTime", "qwSimStartTime", "qwSimEndTime",
+            "qwRenderSubmitStartTime", "qwRenderSubmitEndTime",
+            "qwPresentStartTime", "qwPresentEndTime",
+            "qwDriverStartTime", "qwDriverEndTime",
+            "qwOsRenderQueueStartTime", "qwOsRenderQueueEndTime",
+            "qwGpuRenderStartTime", "qwGpuRenderEndTime", "dwFrameTime",
+            "dwGpuActiveRenderTime", "dwGpuFrameTime", "dwStatFrameTimeBufPos",
+        };
+        auto previousTimingValues = RTSSReader::getInstance().timingValues();
+        auto timingChangeCounts = previousTimingValues;
+        timingChangeCounts.fill(0);
+        auto nextDebugOutput = std::chrono::steady_clock::now() + 1s;
+        PresentMonDebug presentMonDebug;
+        PresentMonSnapshot presentMonSnapshot;
+        constexpr std::array<const char*, 6> presentMonNames = {
+            "dwFrameCount", "dwFramePos", "status", "latestProcessId", "latestPresentMode", "latestDisplayedTime",
+        };
+        std::array<double, 6> presentMonValues{};
+        std::array<double, 6> previousPresentMonValues{};
+        std::array<uint64_t, 6> presentMonChangeCounts{};
+        bool hasPreviousPresentMonValues = false;
+        uint64_t presentMonFramesThisSecond = 0;
+        uint64_t presentMonPositionChangesThisSecond = 0;
+#endif
         int framesDetected = 0;
         while (running)
         {
             // auto start = startTiming();
-            uint64_t present = RTSSReader::getInstance().presentTime();
+            uint64_t present = RTSSReader::getInstance().presentTime(
+                frameDetectionCompatibilityMode.load(std::memory_order_relaxed));
+#if DEBUG_PRESENT_TIME
+            const auto timingValues = RTSSReader::getInstance().timingValues();
+            // ponytail: counts changes observed between polls; exact write counts need an RTSS event/counter.
+            for (size_t i = 0; i < timingValues.size(); ++i)
+            {
+                if (timingValues[i] != previousTimingValues[i])
+                {
+                    ++timingChangeCounts[i];
+                    previousTimingValues[i] = timingValues[i];
+                }
+            }
+            const auto presentMon = presentMonDebug.poll();
+            presentMonSnapshot = presentMon;
+            if (presentMon.available)
+            {
+                presentMonFramesThisSecond += presentMon.framesSincePoll;
+                if (presentMon.positionChanged) ++presentMonPositionChangesThisSecond;
+                presentMonValues = {
+                    static_cast<double>(presentMon.frameCount),
+                    static_cast<double>(presentMon.framePos),
+                    static_cast<double>(presentMon.status),
+                    static_cast<double>(presentMon.latestProcessId),
+                    static_cast<double>(presentMon.latestPresentMode),
+                    std::isfinite(presentMon.latestDisplayedTime) ? presentMon.latestDisplayedTime : 0.0,
+                };
+                if (hasPreviousPresentMonValues)
+                {
+                    // ponytail: counts PMDP field transitions between polls; dwFrameCount delta remains the frame total.
+                    for (size_t i = 0; i < presentMonValues.size(); ++i)
+                    {
+                        if (presentMonValues[i] != previousPresentMonValues[i])
+                            ++presentMonChangeCounts[i];
+                    }
+                }
+                else
+                {
+                    hasPreviousPresentMonValues = true;
+                }
+                previousPresentMonValues = presentMonValues;
+            }
+            else
+            {
+                hasPreviousPresentMonValues = false;
+            }
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= nextDebugOutput)
+            {
+                size_t changedFields = 0;
+                uint64_t totalChanges = 0;
+                for (const uint64_t count : timingChangeCounts)
+                {
+                    if (count) ++changedFields;
+                    totalChanges += count;
+                }
+                std::cout << "RTSS timing values: " << changedFields << "/" << timingValues.size()
+                    << " fields changed, " << totalChanges << " total observed changes in 1s" << std::endl;
+                for (size_t i = 0; i < timingValues.size(); ++i)
+                {
+                    std::cout << "  " << timingNames[i] << ": " << timingValues[i]
+                        << " (" << timingChangeCounts[i] << " changes)" << std::endl;
+                }
+                size_t presentMonChangedFields = 0;
+                uint64_t presentMonTotalChanges = 0;
+                for (const uint64_t count : presentMonChangeCounts)
+                {
+                    if (count) ++presentMonChangedFields;
+                    presentMonTotalChanges += count;
+                }
+                if (!presentMonSnapshot.available)
+                {
+                    std::cout << "PresentMon: PMDPSharedMemory unavailable, " << presentMonChangedFields
+                        << "/" << presentMonChangeCounts.size() << " fields changed, "
+                        << presentMonTotalChanges << " total observed changes in 1s" << std::endl;
+                }
+                else
+                {
+                    std::cout << "PresentMon: " << presentMonChangedFields << "/" << presentMonChangeCounts.size()
+                        << " fields changed, " << presentMonTotalChanges << " total observed changes in 1s, "
+                        << presentMonFramesThisSecond
+                        << " new frames in 1s, " << presentMonPositionChangesThisSecond
+                        << " observed dwFramePos changes, dwFrameCount=" << presentMonSnapshot.frameCount
+                        << ", dwFramePos=" << presentMonSnapshot.framePos
+                        << ", status=" << presentMonSnapshot.status
+                        << ", latest PID=" << presentMonSnapshot.latestProcessId
+                        << ", PresentMode=" << presentMonSnapshot.latestPresentMode
+                        << ", DisplayedTime=" << presentMonSnapshot.latestDisplayedTime << " ms";
+                    if (presentMonSnapshot.counterReset) std::cout << " (counter reset)";
+                    std::cout << std::endl;
+                    for (size_t i = 0; i < presentMonValues.size(); ++i)
+                    {
+                        std::cout << "  PresentMon." << presentMonNames[i] << ": " << presentMonValues[i]
+                            << " (" << presentMonChangeCounts[i] << " changes)" << std::endl;
+                    }
+                }
+                timingChangeCounts.fill(0);
+                presentMonChangeCounts.fill(0);
+                presentMonFramesThisSecond = 0;
+                presentMonPositionChangesThisSecond = 0;
+                nextDebugOutput = now + 1s;
+            }
+#endif
             if (present && present != previousPresentTime)
             {
                 previousPresentTime = present;
                 const bool enhanced = HookHandler::getInstance().isEnhancedTarget();
-                if (!enhanced) framesDetected = 0;
-                const int multiplier = std::clamp(enhancedFrameGenerationMultiplier.load(std::memory_order_relaxed), 1, 4);
-                if (!enhanced || ++framesDetected >= multiplier)
+                const int multiplier = std::max(
+                    maximizeReliability.load(std::memory_order_relaxed) ? 2 : 1,
+                    enhanced ? std::clamp(enhancedFrameGenerationMultiplier.load(std::memory_order_relaxed), 1, 4) : 1);
+                if (++framesDetected >= multiplier)
                 {
                     framesDetected = 0;
                     InputHandler::getInstance().executeFirstQueuedTask();
@@ -564,7 +872,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int)
 
             if (!InputHandler::getInstance().hasQueuedTasks())
             {
-                if (preciseRtssPolling.load(std::memory_order_relaxed))
+#if DEBUG_PRESENT_TIME
+                constexpr bool precisePolling = true;
+#else
+                const bool precisePolling = preciseRtssPolling.load(std::memory_order_relaxed);
+#endif
+                if (precisePolling)
                 {
                     const int pauseCount = pauseInstructionsInTimespan.load(std::memory_order_relaxed);
                     for (int i = 0; i < pauseCount * 1.5; ++i) _mm_pause(); // multiply by 1.5 because idk

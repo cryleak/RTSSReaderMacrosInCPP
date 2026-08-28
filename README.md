@@ -8,6 +8,8 @@ Speedy GTA macros. Same speed as old AutoHotkey macros. May not work well on CPU
 - Visual C++ Redistributable
 - RivaTuner Statistics Server with the GTA V or GTA V Enhanced executable's application detection level set to high.
 [Example RivaTuner configuration](https://i.troplo.com/i/7d15f779decc.gif).
+> [!NOTE]
+> If macros aren't triggering at all, try enabling "Frame detection compatibility mode" in advanced settings.
 
 ## How to use
 - Open it
@@ -15,5 +17,3 @@ Speedy GTA macros. Same speed as old AutoHotkey macros. May not work well on CPU
 - Configure macros
 - Save your changes
 - Play the game
-
-Launch with `--console` to show a console window for `std::cout` output while the GUI runs.

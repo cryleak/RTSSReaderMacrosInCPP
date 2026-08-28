@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <cwchar>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
@@ -207,6 +208,8 @@ namespace
         case SettingId::AutomaticLeftClickHandling: return L"Automatic left click handling";
         case SettingId::AutomaticHorizontalKeyHandling: return L"Automatic horizontal key handling";
         case SettingId::PreciseRtssPolling: return L"Precise RTSS polling";
+        case SettingId::FrameDetectionCompatibilityMode: return L"Frame detection compatibility mode";
+        case SettingId::MaximizeReliability: return L"Maximize reliability";
         case SettingId::ExplicitRpgSwitchHotkey: return L"Explicit RPG switch";
         case SettingId::ExplicitHomingSwitchHotkey: return L"Explicit homing switch";
         case SettingId::ExplicitGrenadeSwitchHotkey: return L"Explicit grenade switch";
@@ -598,6 +601,8 @@ void NativeGui::drawPage(float width, float height)
         {SettingId::AutomaticLeftClickHandling, Tab::Advanced, L"Automatic left click handling", L"Automatically release and restore left click when shift switching weapons."},
         {SettingId::AutomaticHorizontalKeyHandling, Tab::Advanced, L"Automatic horizontal key handling", L"Automatically release and restore A/D when shift switching weapons."},
         {SettingId::PreciseRtssPolling, Tab::Advanced, L"Precise RTSS polling", L"Spin with _mm_pause instead of sleeping with unreliable Windows methods. Uses more CPU."},
+        {SettingId::FrameDetectionCompatibilityMode, Tab::Advanced, L"Frame detection compatibility mode", L"Uses dwStatFrameTimeBufPos instead of qwPresentEndTime. May make macros less reliable, but can work much better on systems where normal detection fails completely. It is up to you to decide if these are still better than AutoHotkey macros."},
+        {SettingId::MaximizeReliability, Tab::Advanced, L"Maximize reliability", L"Waits for two detected frames before each input instead of one. Much slower, but may be more reliable on some systems."},
         {SettingId::FrameGenerationMultiplier, Tab::Advanced, L"Frame generation multiplier", L"For compatbility with Frame Generation on Enhanced. Macros may still be more buggy."},
         {SettingId::ExplicitRpgSwitchHotkey, Tab::Advanced, L"Explicit RPG switch", L"Guarantees a switch to RPG if your weapon loadout has the RPG in the first heavy-weapon slot."},
         {SettingId::ExplicitHomingSwitchHotkey, Tab::Advanced, L"Explicit homing switch", L"Guarantees a switch to homing launcher if your weapon loadout has it in the second heavy-weapon slot."},
@@ -613,9 +618,35 @@ void NativeGui::drawPage(float width, float height)
     constexpr float left = 294.0f;
     constexpr float gap = 16.0f;
     const float cardWidth = (width - left - 32.0f - gap) / 2.0f;
-    constexpr float cardHeight = 112.0f;
+    constexpr float minimumCardHeight = 112.0f;
+    constexpr float descriptionTop = 43.0f;
+    constexpr float descriptionBottomPadding = 14.0f;
     constexpr float rowGap = 12.0f;
-    const float maxScroll = std::max(0.0f, ((visible.size() + 1) / 2.0f) * (cardHeight + rowGap) - (contentBottom - contentTop));
+    std::vector<float> cardHeights(visible.size(), minimumCardHeight);
+    for (size_t i = 0; i < visible.size(); ++i)
+    {
+        ComPtr<IDWriteTextLayout> layout;
+        DWRITE_TEXT_METRICS metrics{};
+        if (writeFactory && smallFormat && SUCCEEDED(writeFactory->CreateTextLayout(
+                visible[i]->description, static_cast<UINT32>(std::wcslen(visible[i]->description)), smallFormat.Get(),
+                cardWidth - 50.0f, std::numeric_limits<float>::max(), &layout)) &&
+            SUCCEEDED(layout->GetMetrics(&metrics)))
+        {
+            cardHeights[i] = std::max(minimumCardHeight, descriptionTop + metrics.height + descriptionBottomPadding);
+        }
+    }
+
+    const size_t rowCount = (visible.size() + 1) / 2;
+    std::vector<float> rowTops(rowCount);
+    float contentHeight = 0.0f;
+    for (size_t row = 0; row < rowCount; ++row)
+    {
+        rowTops[row] = contentHeight;
+        const size_t firstCard = row * 2;
+        const float rowHeight = std::max(cardHeights[firstCard], firstCard + 1 < cardHeights.size() ? cardHeights[firstCard + 1] : 0.0f);
+        contentHeight += rowHeight + (row + 1 < rowCount ? rowGap : 0.0f);
+    }
+    const float maxScroll = std::max(0.0f, contentHeight - (contentBottom - contentTop));
     targetScrollOffset = std::clamp(targetScrollOffset, 0.0f, maxScroll);
     scrollOffset = std::clamp(scrollOffset, 0.0f, maxScroll);
 
@@ -623,14 +654,13 @@ void NativeGui::drawPage(float width, float height)
     for (size_t i = 0; i < visible.size(); ++i)
     {
         float column = static_cast<float>(i % 2);
-        float row = static_cast<float>(i / 2);
         float x = left + column * (cardWidth + gap);
         float reveal = clamp01((pageProgress - static_cast<float>(i) * 0.04f) / 0.22f);
         float cardProgress = easeOutCubic(reveal);
         float slide = (1.0f - cardProgress) * 36.0f;
-        float y = contentTop + row * (cardHeight + rowGap) - scrollOffset;
+        float y = contentTop + rowTops[i / 2] - scrollOffset;
         float drawX = x - slide;
-        Rect card{drawX, y, drawX + cardWidth, y + cardHeight};
+        Rect card{drawX, y, drawX + cardWidth, y + cardHeights[i]};
         int cardHitIndex = static_cast<int>(hits.size());
         bool hovered = hoverHit == cardHitIndex;
         float hoverAmount = hovered ? hoverProgress : 0.0f;
@@ -638,7 +668,7 @@ void NativeGui::drawPage(float width, float height)
                      withAlpha(mixColor(kCardBottom, kCardHoverBottom, hoverAmount), cardProgress), 12);
         stroke(card, withAlpha(kBorder, cardProgress), 12);
         drawText(visible[i]->label, {drawX + 18, y + 14, drawX + cardWidth - 20, y + 35}, navFormat.Get(), withAlpha(kText, cardProgress));
-        drawText(visible[i]->description, {drawX + 18, y + 43, drawX + cardWidth - 32, y + 94}, smallFormat.Get(), withAlpha(kMuted, cardProgress));
+        drawText(visible[i]->description, {drawX + 18, y + descriptionTop, drawX + cardWidth - 32, y + cardHeights[i] - descriptionBottomPadding}, smallFormat.Get(), withAlpha(kMuted, cardProgress));
         Rect control{drawX + cardWidth - 148, y + 14, drawX + cardWidth - 18, y + 42};
         int controlHitIndex = static_cast<int>(hits.size());
         bool controlHovered = hoverHit == controlHitIndex;

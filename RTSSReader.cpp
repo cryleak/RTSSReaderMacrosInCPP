@@ -27,6 +27,26 @@ namespace
     {
         return _wcsicmp(value.c_str(), L"GTA5.exe") == 0 || _wcsicmp(value.c_str(), L"GTA5_Enhanced.exe") == 0;
     }
+
+    constexpr std::array<size_t, 17> kTimingOffsets = {
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwInputSampleTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwSimStartTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwSimEndTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwRenderSubmitStartTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwRenderSubmitEndTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwPresentStartTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwPresentEndTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwDriverStartTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwDriverEndTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwOsRenderQueueStartTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwOsRenderQueueEndTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwGpuRenderStartTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwGpuRenderEndTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, dwFrameTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, dwGpuActiveRenderTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, dwGpuFrameTime),
+        offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, dwStatFrameTimeBufPos),
+    };
 }
 
 RTSSReader::~RTSSReader()
@@ -168,20 +188,44 @@ RtssStatus RTSSReader::refresh()
         return currentStatus;
     }
     setStatus(RtssState::Ready, "RTSS data ready", candidate);
-    currentStatus.presentTime = readMappedPresentTime();
+    currentStatus.presentTime = readMappedPresentTime(false);
     return currentStatus;
 }
 
-uint64_t RTSSReader::presentTime() const
+uint64_t RTSSReader::presentTime(bool useFrameTimeBufferPosition) const
 {
     std::shared_lock lock(mappingMutex);
-    return readMappedPresentTime();
+    return readMappedPresentTime(useFrameTimeBufferPosition);
 }
 
-uint64_t RTSSReader::readMappedPresentTime() const
+std::array<uint64_t, 17> RTSSReader::timingValues() const
+{
+    std::shared_lock lock(mappingMutex);
+    std::array<uint64_t, 17> result{};
+    if (!pTargetApp) return result;
+
+    const char* entry = reinterpret_cast<const char*>(pTargetApp);
+    for (size_t i = 0; i < 13; ++i)
+    {
+        result[i] = *reinterpret_cast<const uint64_t*>(entry + kTimingOffsets[i]);
+    }
+    for (size_t i = 13; i < result.size(); ++i)
+    {
+        result[i] = *reinterpret_cast<const DWORD*>(entry + kTimingOffsets[i]);
+    }
+    return result;
+}
+
+uint64_t RTSSReader::readMappedPresentTime(bool useFrameTimeBufferPosition) const
 {
     if (!pTargetApp) return 0;
-    return *reinterpret_cast<const uint64_t*>(reinterpret_cast<const char*>(pTargetApp) +
+    const char* entry = reinterpret_cast<const char*>(pTargetApp);
+    if (useFrameTimeBufferPosition)
+    {
+        return *reinterpret_cast<const DWORD*>(entry +
+            offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, dwStatFrameTimeBufPos));
+    }
+    return *reinterpret_cast<const uint64_t*>(entry +
         offsetof(RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY, qwPresentEndTime));
 }
 

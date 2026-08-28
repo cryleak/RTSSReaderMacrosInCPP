@@ -60,6 +60,8 @@ enum class SettingId
     AutomaticLeftClickHandling,
     AutomaticHorizontalKeyHandling,
     PreciseRtssPolling,
+    FrameDetectionCompatibilityMode,
+    MaximizeReliability,
     ExplicitRpgSwitchHotkey,
     ExplicitHomingSwitchHotkey,
     ExplicitGrenadeSwitchHotkey,
@@ -111,6 +113,8 @@ struct MacroSettings
     bool automaticLeftClickHandling = false;
     bool automaticHorizontalKeyHandling = false;
     bool preciseRtssPolling = false;
+    bool frameDetectionCompatibilityMode = false;
+    bool maximizeReliability = false;
     KeyChord explicitRpgSwitchHotkey;
     KeyChord explicitHomingSwitchHotkey;
     KeyChord explicitGrenadeSwitchHotkey;

@@ -322,6 +322,8 @@ const std::vector<SettingDefinition>& settingDefinitions()
         SettingDefinition{SettingId::AutomaticLeftClickHandling, "automatic_left_click_handling", SettingType::Boolean, nullptr, &MacroSettings::automaticLeftClickHandling},
         SettingDefinition{SettingId::AutomaticHorizontalKeyHandling, "automatic_horizontal_key_handling", SettingType::Boolean, nullptr, &MacroSettings::automaticHorizontalKeyHandling},
         SettingDefinition{SettingId::PreciseRtssPolling, "precise_rtss_polling", SettingType::Boolean, nullptr, &MacroSettings::preciseRtssPolling},
+        SettingDefinition{SettingId::FrameDetectionCompatibilityMode, "frame_detection_compatibility_mode", SettingType::Boolean, nullptr, &MacroSettings::frameDetectionCompatibilityMode},
+        SettingDefinition{SettingId::MaximizeReliability, "maximize_reliability", SettingType::Boolean, nullptr, &MacroSettings::maximizeReliability},
         SettingDefinition{SettingId::ExplicitRpgSwitchHotkey, "explicit_rpg_switch_hotkey", SettingType::KeyChord, &MacroSettings::explicitRpgSwitchHotkey},
         SettingDefinition{SettingId::ExplicitHomingSwitchHotkey, "explicit_homing_switch_hotkey", SettingType::KeyChord, &MacroSettings::explicitHomingSwitchHotkey},
         SettingDefinition{SettingId::ExplicitGrenadeSwitchHotkey, "explicit_grenade_switch_hotkey", SettingType::KeyChord, &MacroSettings::explicitGrenadeSwitchHotkey},
@@ -378,8 +380,8 @@ bool runSettingsSelfTest(std::string& error)
             return false;
         }
     }
-    if (defaults.quickTurnDegrees != 180 || defaults.frameGenerationMultiplier != 1 || !defaults.useCursorMacros || !defaults.repressLeftClick || defaults.automaticLeftClickHandling || defaults.automaticHorizontalKeyHandling || defaults.preciseRtssPolling ||
-        !settingIsBoolean(SettingId::ThermalNightVision) || settingIsBoolean(SettingId::ThermalHotkey) ||
+    if (defaults.quickTurnDegrees != 180 || defaults.frameGenerationMultiplier != 1 || !defaults.useCursorMacros || !defaults.repressLeftClick || defaults.automaticLeftClickHandling || defaults.automaticHorizontalKeyHandling || defaults.preciseRtssPolling || defaults.frameDetectionCompatibilityMode || defaults.maximizeReliability ||
+        !settingIsBoolean(SettingId::ThermalNightVision) || !settingIsBoolean(SettingId::FrameDetectionCompatibilityMode) || !settingIsBoolean(SettingId::MaximizeReliability) || settingIsBoolean(SettingId::ThermalHotkey) ||
         settingBool(defaults, SettingId::ThermalNightVision) || !settingIsInteger(SettingId::QuickTurnDegrees) || !settingIsInteger(SettingId::FrameGenerationMultiplier) || settingIsInteger(SettingId::QuickTurnHotkey))
     {
         error = "Default settings failed validation.";

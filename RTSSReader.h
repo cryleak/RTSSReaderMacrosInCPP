@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <array>
 #include <cstdint>
 #include <mutex>
 #include <shared_mutex>
@@ -42,7 +43,8 @@ public:
 
     RtssStatus refresh();
     const RtssStatus& status() const { return currentStatus; }
-    uint64_t presentTime() const;
+    uint64_t presentTime(bool useFrameTimeBufferPosition = false) const;
+    std::array<uint64_t, 17> timingValues() const;
     void close();
 
 private:
@@ -60,7 +62,7 @@ private:
     bool openMapping();
     void closeMapping();
     RTSS_SHARED_MEMORY::RTSS_SHARED_MEMORY_APP_ENTRY* findProcess(const Candidate& candidate) const;
-    uint64_t readMappedPresentTime() const;
+    uint64_t readMappedPresentTime(bool useFrameTimeBufferPosition) const;
     void setStatus(RtssState state, std::string message, const Candidate& candidate);
 
     HANDLE hMapFile = nullptr;
